@@ -2,6 +2,23 @@
 
 一套按《牛来》正片截图质感做的生成式 PFP：**角色主体 / 姿势 / 五官 / 衣服 / 配饰 / 背景**各自用 Seedream 生图，抠图后按稀有度随机拼接，再叠**贴图故障、弹幕、票房计数器、加场印章、影院翻拍滤镜**。
 
+## 仓库 · 备份 · 恢复
+
+- **代码仓库**（源码 + 小资产，不含密钥/大文件）：https://github.com/Howe813/niulai-nft （私有）
+- **大文件备份**（`raw/` 生图组件 403M、`layers/` 抠图层 276M、`out/png` 999 张原图 1.3G）：服务器 `root@2.24.118.196:/opt/niulai/backup/niulai-nft/`
+- **线上**：网站/元数据/图片在 `/var/www/niulai`，IPFS 节点 `systemd ipfs`，keeper `systemd niulai-keeper`（详见 README-chain.md）
+- **密钥不在仓库里**，需自备：`contracts/.env`（DEPLOYER_PK 等，模板见 `contracts/.env.example`）、`.env`（ARK_API_KEY，模板 `.env.example`）、服务器 `/opt/niulai/keeper/.env`
+
+恢复完整工作目录：
+```bash
+git clone https://github.com/Howe813/niulai-nft && cd niulai-nft
+rsync -az root@2.24.118.196:/opt/niulai/backup/niulai-nft/raw/ raw/        # 需要重新生成/拼接时才拉
+rsync -az root@2.24.118.196:/opt/niulai/backup/niulai-nft/layers/ layers/
+rsync -az root@2.24.118.196:/opt/niulai/backup/niulai-nft/out/png/ out/png/
+uv venv .venv && uv pip install --python .venv/bin/python pillow numpy requests
+cd contracts && forge build && forge test          # 依赖库已随仓库提交
+```
+
 ## 0. 一分钟上手
 
 ```bash
