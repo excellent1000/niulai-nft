@@ -241,14 +241,15 @@
 
 
 
+<script src="assets/ethers.umd.min.js"></script>
 <script type="module">
-import { ethers } from 'https://cdn.jsdelivr.net/npm/ethers@6.13.2/+esm';
+const { ethers } = window;
 
 // ====== 部署后改这里（或 URL 参数覆盖：?nft=0x..&vault=0x..&rpc=http://127.0.0.1:8545） ======
 const q = new URLSearchParams(location.search);
 const CONFIG = {
   chainId: 56, chainHex: '0x38',
-  rpc: q.get('rpc') || 'https://bsc-dataseed.binance.org',
+  rpcs: [q.get('rpc'), 'https://bsc-dataseed.bnbchain.org', 'https://bsc-dataseed1.defibit.io', 'https://bsc-dataseed1.ninicoin.io', 'https://bsc-rpc.publicnode.com', 'https://1rpc.io/bnb', 'https://bsc.drpc.org', 'https://bsc-dataseed.binance.org', 'https://binance.llamarpc.com'].filter(Boolean),
   nft: q.get('nft') || '0x5fd0d8FeCF408f61080cEa470249026d3e02fB3D',
   vault: q.get('vault') || '0x311188bef22479edE7bd29b61a7aE7D84bA6B55C',
   token: '0xBEEA1D618e533a387D941F58a7d4c9b7bD377777',
@@ -265,9 +266,27 @@ const ERC20_ABI = ['function balanceOf(address) view returns (uint256)', 'functi
 const $ = id => document.getElementById(id);
 const log = m => { $('log').textContent = `${new Date().toLocaleTimeString()} ${m}\n` + $('log').textContent; };
 const fmt = (wei, d = 3) => Number(ethers.formatEther(wei)).toLocaleString(undefined, { maximumFractionDigits: d });
-const ro = new ethers.JsonRpcProvider(CONFIG.rpc, CONFIG.chainId);
-const nftRO = new ethers.Contract(CONFIG.nft, NFT_ABI, ro), vaultRO = new ethers.Contract(CONFIG.vault, VAULT_ABI, ro), tokenRO = new ethers.Contract(CONFIG.token, ERC20_ABI, ro);
+// 并发探测所有 RPC，用最快能回块高的那个（国内环境部分节点不通）；连上钱包后优先用钱包的节点读
+const NET = ethers.Network.from(CONFIG.chainId);
+async function probeRpc(url) {
+  const ctl = new AbortController(); const t = setTimeout(() => ctl.abort(), 5000);
+  try {
+    const r = await fetch(url, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }), signal: ctl.signal });
+    const j = await r.json(); if (parseInt(j.result, 16) !== CONFIG.chainId) throw new Error('wrong chain'); return url;
+  } finally { clearTimeout(t); }
+}
+let ro = null, roUrl = null;
+async function pickRpc() {
+  try { roUrl = await Promise.any(CONFIG.rpcs.map(probeRpc)); }
+  catch { roUrl = CONFIG.rpcs[0]; }
+  ro = new ethers.JsonRpcProvider(roUrl, NET, { staticNetwork: NET, batchMaxCount: 1 });
+  return ro;
+}
 let signer, account, unitPrice = 0n;
+const readProvider = () => (signer ? signer.provider : ro);
+const nftR = () => new ethers.Contract(CONFIG.nft, NFT_ABI, readProvider());
+const vaultR = () => new ethers.Contract(CONFIG.vault, VAULT_ABI, readProvider());
+const tokenR = () => new ethers.Contract(CONFIG.token, ERC20_ABI, readProvider());
 $('okxLink').href = CONFIG.okx; $('elementLink').href = CONFIG.element; $('buyLink').href = CONFIG.buy;
 $('scanLink').href = `https://bscscan.com/address/${CONFIG.nft}`; $('vaultScan').href = `https://bscscan.com/address/${CONFIG.vault}`;
 
@@ -383,10 +402,14 @@ $('modePoster').onclick = () => setMode(true); $('modeFilm').onclick = () => set
 if (localStorage.getItem('niulai-mode') === 'poster') setMode(true);
 
 const DEPLOYED = CONFIG.nft !== '0x0000000000000000000000000000000000000000';
+let failCount = 0;
 async function refresh() {
   if (!DEPLOYED) { $('saleState').textContent = '未开始'; $('minted').textContent = '0'; $('price').textContent = '1,000 牛来'; $('maxPerWallet').textContent = '5'; return; }
+  if (!ro && !signer) await pickRpc();
   try {
+    const nftRO = nftR(), vaultRO = vaultR(), tokenRO = tokenR();
     const [supply, price, mpw, pub, al] = await Promise.all([nftRO.totalSupply(), nftRO.price(), nftRO.maxPerWallet(), nftRO.publicSaleActive(), nftRO.allowlistSaleActive()]);
+    failCount = 0;
     unitPrice = price;
     $('minted').textContent = supply; $('bar').style.width = `${Math.max(1.5, Number(supply) / 999 * 100)}%`;
     $('price').textContent = `${fmt(price, 0)} 牛来`; $('maxPerWallet').textContent = mpw;
@@ -409,7 +432,10 @@ async function refresh() {
     $('round').textContent = active ? `#${rid} 分发中，剩 ${rem} 枚` : (rid > 0n ? `#${rid} 已完成` : '尚未开始');
     $('distribute').disabled = !(active && account);
     if (account) $('myCount').textContent = await nftRO.balanceOf(account);
-  } catch (e) { log('读取失败：' + (e.shortMessage || e.message)); }
+  } catch (e) {
+    failCount++; $('saleState').textContent = '读取中…（第 ' + failCount + ' 次重试）'; log('读取失败：' + (e.shortMessage || e.message) + (roUrl ? ' @ ' + roUrl : ''));
+    ro = null; if (!signer) setTimeout(refresh, 2500);   // 换个节点再试
+  }
 }
 function updateTotal() { const n = Number($('qty').value || 1); $('total').textContent = unitPrice ? `合计 ${fmt(unitPrice * BigInt(n), 0)} 牛来` : ''; }
 
@@ -451,7 +477,7 @@ $('connect').onclick = connect; $('mintBtn').onclick = mint; $('approve').onclic
 $('plus').onclick = () => { $('qty').value = Math.min(5, Number($('qty').value) + 1); updateTotal(); refresh(); };
 $('minus').onclick = () => { $('qty').value = Math.max(1, Number($('qty').value) - 1); updateTotal(); refresh(); };
 $('qty').oninput = () => { updateTotal(); refresh(); };
-refresh(); if (DEPLOYED) setInterval(refresh, 30000);
+pickRpc().then(refresh); if (DEPLOYED) setInterval(refresh, 30000);
 </script>
 </body>
 </html>
