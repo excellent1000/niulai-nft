@@ -1,0 +1,9 @@
+{
+  "name": "牛来 NFT",
+  "symbol": "NIULAI",
+  "description": "牛来 NFT，共 999 枚（BNB Chain）。二级市场 10% 版税进入金库，每小时买入 $牛来 并自动分发给持有者。",
+  "image": "https://niulai.sbs/ipfs/bafybeiaxbf5pzat7tyitaaodoombb5vrrg5iipbwgbppfz36ncutilxp4y/0001.png",
+  "external_link": "https://niulai.sbs",
+  "seller_fee_basis_points": 1000,
+  "fee_recipient": "0x311188bef22479edE7bd29b61a7aE7D84bA6B55C"
+}

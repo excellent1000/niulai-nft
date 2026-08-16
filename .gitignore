@@ -1,0 +1,19 @@
+# 密钥
+.env
+contracts/.env
+keeper/.env
+# 大文件（备份在服务器 /opt/niulai/backup/niulai-nft）
+raw/
+layers/
+out/png/
+out/sheet.png
+# 可重建
+.venv/
+keeper/node_modules/
+contracts/out/
+contracts/cache/
+contracts/broadcast/**/dry-run/
+_svg-prototype/
+__pycache__/
+*.pyc
+.DS_Store

@@ -1,0 +1,52 @@
+{
+  "name": "牛来 #0908",
+  "description": "牛来 NFT #0908。角色：牛妈，稀有度：稀有。共 999 枚，二级市场 10% 版税每小时买入 $牛来 并自动分发给持有者。",
+  "image": "https://niulai.sbs/ipfs/bafybeiaxbf5pzat7tyitaaodoombb5vrrg5iipbwgbppfz36ncutilxp4y/0908.png",
+  "attributes": [
+    {
+      "trait_type": "稀有度",
+      "value": "稀有"
+    },
+    {
+      "trait_type": "角色",
+      "value": "牛妈"
+    },
+    {
+      "trait_type": "姿势",
+      "value": "直立呆站"
+    },
+    {
+      "trait_type": "五官",
+      "value": "五星眼"
+    },
+    {
+      "trait_type": "贴图",
+      "value": "贴图丢失"
+    },
+    {
+      "trait_type": "衣服",
+      "value": "校服外套"
+    },
+    {
+      "trait_type": "配饰",
+      "value": "无"
+    },
+    {
+      "trait_type": "背景",
+      "value": "荒漠夜"
+    },
+    {
+      "trait_type": "特效",
+      "value": "弹幕"
+    },
+    {
+      "trait_type": "见证者",
+      "value": "云雀在场"
+    },
+    {
+      "trait_type": "画质",
+      "value": "片源直出"
+    }
+  ],
+  "external_url": "https://niulai.sbs/token/908"
+}

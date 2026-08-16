@@ -1,0 +1,52 @@
+{
+  "name": "牛来 #0677",
+  "description": "牛来 NFT #0677。角色：路人牛，稀有度：普通。共 999 枚，二级市场 10% 版税每小时买入 $牛来 并自动分发给持有者。",
+  "image": "https://niulai.sbs/ipfs/bafybeiaxbf5pzat7tyitaaodoombb5vrrg5iipbwgbppfz36ncutilxp4y/0677.png",
+  "attributes": [
+    {
+      "trait_type": "稀有度",
+      "value": "普通"
+    },
+    {
+      "trait_type": "角色",
+      "value": "路人牛"
+    },
+    {
+      "trait_type": "姿势",
+      "value": "T-pose残留"
+    },
+    {
+      "trait_type": "五官",
+      "value": "豆眼"
+    },
+    {
+      "trait_type": "贴图",
+      "value": "UV接缝可见"
+    },
+    {
+      "trait_type": "衣服",
+      "value": "红领巾"
+    },
+    {
+      "trait_type": "配饰",
+      "value": "电影票根"
+    },
+    {
+      "trait_type": "背景",
+      "value": "悬崖推土车"
+    },
+    {
+      "trait_type": "特效",
+      "value": "无"
+    },
+    {
+      "trait_type": "见证者",
+      "value": "云雀缺席"
+    },
+    {
+      "trait_type": "画质",
+      "value": "片源直出"
+    }
+  ],
+  "external_url": "https://niulai.sbs/token/677"
+}
