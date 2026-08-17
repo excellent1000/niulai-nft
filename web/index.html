@@ -210,7 +210,7 @@
       <div class="row"><span class="muted">我的 $牛来</span><span id="myToken">–</span></div>
       <div class="row"><span class="muted">每钱包上限</span><span id="maxPerWallet">–</span></div>
       <div class="row"><span class="muted">状态</span><span id="saleState">–</span></div>
-      <div class="qty"><button class="btn ghost" id="minus">−</button><input id="qty" type="number" min="1" max="5" value="1" /><button class="btn ghost" id="plus">＋</button><span class="muted" id="total"></span></div>
+      <div class="qty"><button class="btn ghost" id="minus">−</button><input id="qty" type="number" min="1" max="1" value="1" /><button class="btn ghost" id="plus">＋</button><span class="muted" id="total"></span></div>
       <div style="display:flex; gap:12px; flex-wrap:wrap"><button class="btn ghost" id="approve" disabled style="flex:1">授权 $牛来</button><button class="btn" id="mintBtn" disabled style="flex:1">Mint</button></div>
       <div class="markets"><a id="buyLink" href="#" target="_blank" rel="noopener">PancakeSwap 买 $牛来</a><a id="okxLink" href="#" target="_blank" rel="noopener">OKX NFT</a><a id="elementLink" href="#" target="_blank" rel="noopener">Element</a><a id="scanLink" href="#" target="_blank" rel="noopener">BscScan</a></div>
     </div>
@@ -404,7 +404,7 @@ if (localStorage.getItem('niulai-mode') === 'poster') setMode(true);
 const DEPLOYED = CONFIG.nft !== '0x0000000000000000000000000000000000000000';
 let failCount = 0;
 async function refresh() {
-  if (!DEPLOYED) { $('saleState').textContent = '未开始'; $('minted').textContent = '0'; $('price').textContent = '1,000 牛来'; $('maxPerWallet').textContent = '5'; return; }
+  if (!DEPLOYED) { $('saleState').textContent = '未开始'; $('minted').textContent = '0'; $('price').textContent = '–'; $('maxPerWallet').textContent = '–'; return; }
   if (!ro && !signer) await pickRpc();
   try {
     const nftRO = nftR(), vaultRO = vaultR(), tokenRO = tokenR();
