@@ -111,7 +111,18 @@ async function sweep() {
   const to = (process.env.TO || '').trim();
   if (!ethers.isAddress(to)) throw new Error('缺少 TO=0x目标地址');
   const withNft = process.env.SWEEP_NFT === '1';
-  const nftT = new ethers.Contract(NFT, ['function tokenOfOwnerByIndex(address,uint256) view returns (uint256)', 'function balanceOf(address) view returns (uint256)', 'function transferFrom(address,address,uint256)', 'event Transfer(address indexed from,address indexed to,uint256 indexed tokenId)'], provider);
+  const nftT = new ethers.Contract(NFT, ['function ownerOf(uint256) view returns (address)', 'function totalSupply() view returns (uint256)', 'function transferFrom(address,address,uint256)'], provider);
+  // 不用 eth_getLogs（节点有区块范围限制）：直接对 1..totalSupply 逐个 ownerOf 建持有表（分批并发）
+  const holdings = new Map();
+  if (withNft) {
+    const n = Number(await nftT.totalSupply()); const ids = Array.from({ length: n }, (_, i) => i + 1);
+    for (let i = 0; i < ids.length; i += 100) {
+      const chunk = ids.slice(i, i + 100);
+      const owners = await Promise.all(chunk.map(id => nftT.ownerOf(id).catch(() => null)));
+      chunk.forEach((id, k) => { const o = owners[k] && owners[k].toLowerCase(); if (o) holdings.set(o, [...(holdings.get(o) || []), id]); });
+    }
+    console.log(`持有表建好：${n} 枚，${holdings.size} 个地址`);
+  }
   const fee = await provider.getFeeData(); const gasPrice = fee.gasPrice;
   let sumBnb = 0n, sumTok = 0n, sumNft = 0;
   for (const w of wallets) {
@@ -122,12 +133,9 @@ async function sweep() {
     const acts = [];
     if (tokBal > 0n) { const r = await (await tokR.connect(s).transfer(to, tokBal, { gasPrice })).wait(); acts.push(`牛来 ${f(tokBal)}`); sumTok += tokBal; }
     if (withNft) {
-      // 合约无 Enumerable：从 Transfer 事件里找该钱包持有的 tokenId
-      const logs = await nftT.queryFilter(nftT.filters.Transfer(null, w.address), 0, 'latest');
-      const ownerOf = new ethers.Contract(NFT, ['function ownerOf(uint256) view returns (address)'], provider);
-      for (const id of new Set(logs.map(l => l.args.tokenId))) {
-        try { if ((await ownerOf.ownerOf(id)).toLowerCase() !== w.address.toLowerCase()) continue; await (await nftT.connect(s).transferFrom(w.address, to, id, { gasPrice })).wait(); acts.push(`NFT #${id}`); sumNft++; }
-        catch (e) { acts.push(`NFT #${id} 失败 ${String(e.message).slice(0, 60)}`); }
+      for (const id of holdings.get(w.address.toLowerCase()) || []) {
+        try { await (await nftT.connect(s).transferFrom(w.address, to, id, { gasPrice })).wait(); acts.push(`NFT #${id}`); sumNft++; }
+        catch (e) { acts.push(`NFT #${id} 失败 ${String(e.shortMessage || e.message).slice(0, 60)}`); }
       }
     }
     const bnb = await provider.getBalance(w.address); const cost = 21000n * gasPrice; const val = bnb - cost;
