@@ -3,7 +3,7 @@
 //   node mint50.mjs reserve                     # 方式 A：owner 用 reserveMint 免费铸 1 枚到每个钱包（不用给钱包打钱）
 //   node mint50.mjs fund                        # 方式 B 第一步：FUNDER_PK 给每个钱包打 BNB gas + 1 牛来（你自己跑）
 //   node mint50.mjs mint                        # 方式 B 第二步：每个钱包 approve + mint(1)
-//   TO=0x目标地址 node mint50.mjs sweep          # 归集：每个钱包的 牛来 + 剩余 BNB（扣 gas）转到 TO；加 SWEEP_NFT=1 连 NFT 一起转
+//   TO=0x目标地址 node mint50.mjs sweep          # 归集：每个钱包的 牛来 + 剩余 BNB（扣 gas）转到 TO；加 SWEEP_NFT=1 连 NFT 一起转；SWEEP_BNB=0 不动 BNB
 // 环境变量：WALLETS=../wallets/wallets-50.json  RPC_URL  OWNER_PK（reserve 用）  FUNDER_PK（fund 用）
 //          FUND_BNB=0.0002  NFT / TOKEN 默认牛来合约
 import fs from 'node:fs';
@@ -131,7 +131,7 @@ async function sweep() {
       }
     }
     const bnb = await provider.getBalance(w.address); const cost = 21000n * gasPrice; const val = bnb - cost;
-    if (val > 0n) { await (await s.sendTransaction({ to, value: val, gasLimit: 21000, gasPrice })).wait(); acts.push(`BNB ${f(val)}`); sumBnb += val; }
+    if (process.env.SWEEP_BNB !== '0' && val > 0n) { await (await s.sendTransaction({ to, value: val, gasLimit: 21000, gasPrice })).wait(); acts.push(`BNB ${f(val)}`); sumBnb += val; }
     console.log(`#${w.tag} ${w.address} → ${acts.join(' · ') || '无可归集'}`);
   }
   console.log(`合计归集到 ${to}：BNB ${f(sumBnb)} · 牛来 ${f(sumTok)}${withNft ? ` · NFT ${sumNft} 枚` : ''}`);
