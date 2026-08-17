@@ -3,7 +3,7 @@
 //   node mint50.mjs reserve                     # 方式 A：owner 用 reserveMint 免费铸 1 枚到每个钱包（不用给钱包打钱）
 //   node mint50.mjs fund                        # 方式 B 第一步：FUNDER_PK 给每个钱包打 BNB gas + 1 牛来（你自己跑）
 //   node mint50.mjs mint                        # 方式 B 第二步：每个钱包 approve + mint(1)
-//   TO=0x目标地址 node mint50.mjs sweep          # 归集：每个钱包的 牛来 + 剩余 BNB（扣 gas）转到 TO；加 SWEEP_NFT=1 连 NFT 一起转；SWEEP_BNB=0 不动 BNB
+//   TO=0x目标地址 node mint50.mjs sweep          # 归集：每个钱包的 NFT + 牛来 + 剩余 BNB（扣 gas）全部转到 TO，出错自动重试并复查；SWEEP_NFT=0 不动 NFT，SWEEP_BNB=0 不动 BNB
 // 环境变量：WALLETS=../wallets/wallets-50.json  RPC_URL  OWNER_PK（reserve 用）  FUNDER_PK（fund 用）
 //          FUND_BNB=0.0002  NFT / TOKEN 默认牛来合约
 import fs from 'node:fs';
@@ -107,10 +107,7 @@ async function mint() {
 }
 
 
-async function sweep() {
-  const to = (process.env.TO || '').trim();
-  if (!ethers.isAddress(to)) throw new Error('缺少 TO=0x目标地址');
-  const withNft = process.env.SWEEP_NFT === '1';
+async function sweepOnce(to, withNft) {
   const nftT = new ethers.Contract(NFT, ['function ownerOf(uint256) view returns (address)', 'function totalSupply() view returns (uint256)', 'function transferFrom(address,address,uint256)'], provider);
   // 不用 eth_getLogs（节点有区块范围限制）：直接对 1..totalSupply 逐个 ownerOf 建持有表（分批并发）
   const holdings = new Map();
@@ -121,28 +118,46 @@ async function sweep() {
       const owners = await Promise.all(chunk.map(id => nftT.ownerOf(id).catch(() => null)));
       chunk.forEach((id, k) => { const o = owners[k] && owners[k].toLowerCase(); if (o) holdings.set(o, [...(holdings.get(o) || []), id]); });
     }
-    console.log(`持有表建好：${n} 枚，${holdings.size} 个地址`);
   }
   const fee = await provider.getFeeData(); const gasPrice = fee.gasPrice;
-  let sumBnb = 0n, sumTok = 0n, sumNft = 0;
+  let sumBnb = 0n, sumTok = 0n, sumNft = 0, left = 0, errs = 0;
   for (const w of wallets) {
-    const s = new ethers.NonceManager(new ethers.Wallet(w.privateKey, provider));
-    const bnb0 = await provider.getBalance(w.address);
-    if (bnb0 === 0n) { continue; }
-    const tokBal = await tokR.balanceOf(w.address);
     const acts = [];
-    if (tokBal > 0n) { const r = await (await tokR.connect(s).transfer(to, tokBal, { gasPrice })).wait(); acts.push(`牛来 ${f(tokBal)}`); sumTok += tokBal; }
-    if (withNft) {
-      for (const id of holdings.get(w.address.toLowerCase()) || []) {
+    try {
+      const s = new ethers.NonceManager(new ethers.Wallet(w.privateKey, provider));
+      const bnb0 = await provider.getBalance(w.address);
+      const tokBal = await tokR.balanceOf(w.address);
+      const myNfts = withNft ? (holdings.get(w.address.toLowerCase()) || []) : [];
+      if (bnb0 === 0n) { if (tokBal > 0n || myNfts.length) { left++; console.log(`#${w.tag} ${w.address} 没有 BNB gas，无法转出（牛来 ${f(tokBal)}，NFT ${myNfts.length}）`); } continue; }
+      if (tokBal > 0n) { await (await tokR.connect(s).transfer(to, tokBal, { gasPrice })).wait(); acts.push(`牛来 ${f(tokBal)}`); sumTok += tokBal; }
+      for (const id of myNfts) {
         try { await (await nftT.connect(s).transferFrom(w.address, to, id, { gasPrice })).wait(); acts.push(`NFT #${id}`); sumNft++; }
-        catch (e) { acts.push(`NFT #${id} 失败 ${String(e.shortMessage || e.message).slice(0, 60)}`); }
+        catch (e) { errs++; acts.push(`NFT #${id} 失败 ${String(e.shortMessage || e.message).slice(0, 60)}`); }
       }
-    }
-    const bnb = await provider.getBalance(w.address); const cost = 21000n * gasPrice; const val = bnb - cost;
-    if (process.env.SWEEP_BNB !== '0' && val > 0n) { await (await s.sendTransaction({ to, value: val, gasLimit: 21000, gasPrice })).wait(); acts.push(`BNB ${f(val)}`); sumBnb += val; }
-    console.log(`#${w.tag} ${w.address} → ${acts.join(' · ') || '无可归集'}`);
+      const bnb = await provider.getBalance(w.address); const cost = 21000n * gasPrice; const val = bnb - cost;
+      if (process.env.SWEEP_BNB !== '0' && val > 0n) { await (await s.sendTransaction({ to, value: val, gasLimit: 21000, gasPrice })).wait(); acts.push(`BNB ${f(val)}`); sumBnb += val; }
+      if (acts.length) console.log(`#${w.tag} ${w.address} → ${acts.join(' · ')}`);
+    } catch (e) { errs++; console.log(`#${w.tag} ${w.address} 出错：${String(e.shortMessage || e.message).slice(0, 100)}（继续下一个）`); }
   }
-  console.log(`合计归集到 ${to}：BNB ${f(sumBnb)} · 牛来 ${f(sumTok)}${withNft ? ` · NFT ${sumNft} 枚` : ''}`);
+  console.log(`本轮归集到 ${to}：BNB ${f(sumBnb)} · 牛来 ${f(sumTok)}${withNft ? ` · NFT ${sumNft} 枚` : ''}；出错 ${errs}，无 gas 卡住 ${left}`);
+  return { errs, left };
+}
+
+async function sweep() {
+  const to = (process.env.TO || '').trim();
+  if (!ethers.isAddress(to)) throw new Error('缺少 TO=0x目标地址');
+  const withNft = process.env.SWEEP_NFT !== '0';   // 默认连 NFT 一起归集；SWEEP_NFT=0 只归集 牛来/BNB
+  for (let pass = 1; pass <= 3; pass++) {
+    console.log(`—— 第 ${pass} 遍 ——`);
+    const { errs } = await sweepOnce(to, withNft);
+    if (!errs) break;
+    console.log('有失败项，10 秒后重试…'); await new Promise(r => setTimeout(r, 10000));
+  }
+  // 复查
+  let restB = 0n, restT = 0n, restN = 0;
+  const own = new ethers.Contract(NFT, ['function balanceOf(address) view returns (uint256)'], provider);
+  for (const w of wallets) { const [b, t, n] = await Promise.all([provider.getBalance(w.address), tokR.balanceOf(w.address), own.balanceOf(w.address)]); restB += b; restT += t; restN += Number(n); }
+  console.log(`复查：${wallets.length} 个钱包剩余 BNB ${f(restB)}（其中每个最多留了一笔 gas 的零头）· 牛来 ${f(restT)} · NFT ${restN}`);
 }
 
 ({ status, reserve, fund, mint, sweep })[cmd]().catch(e => { console.error(e); process.exit(1); });
