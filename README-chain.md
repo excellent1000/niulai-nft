@@ -5,7 +5,7 @@
 > - 网站 https://niulai.sbs（服务器 2.24.118.196，nginx + Let's Encrypt；`/meta` `/img` HTTPS 镜像，`/ipfs/` 自建网关）
 > - IPFS：图片 `bafybeiaxbf5pzat7tyitaaodoombb5vrrg5iipbwgbppfz36ncutilxp4y`，元数据 v2 `bafybeibmduyrrt4y7i5kwthdg4xcdvoyytekzubc3qvxistsh5yclyycfu`，collection.json `bafkreigiev23gjrggidq6pbbs4q5ctxfk3ksey4zvd6qn47pxlzd3wm77y`，都 pin 在服务器 Kubo 节点（systemd `ipfs`，已开 AcceleratedDHTClient）。**链上 baseURI/contractURI 用的是自建网关 HTTPS 形式** `https://niulai.sbs/ipfs/<CID>/…`（公共网关对纯 ipfs:// 传播慢导致 OKX 取不到图，已于上线当天切换；内容仍按 CID 寻址）。要切回 `ipfs://` 只需 `setBaseURI`，前提是公共网关能解析（或再 pin 到 Pinata/Filebase）
 > - keeper：服务器 systemd `niulai-keeper`（`journalctl -u niulai-keeper -f`），env 在 `/opt/niulai/keeper/.env`
-> - 已 reserveMint #1 到 owner，公售已开；Sourcify 已验证源码（BscScan 验证需 API key：`forge verify-contract --chain 56 --etherscan-api-key …`）
+> - 已 reserveMint #1 到 owner，公售已开；**2026-08-17 改价：公售/白名单 1 $牛来，每钱包 1、每笔 1**（tx 0x3c6c529b…，`setSaleConfig` 可再改）；Sourcify 已验证源码（BscScan 验证需 API key：`forge verify-contract --chain 56 --etherscan-api-key …`）
 
 > **市场选择（已定方案 A）**：OpenSea 自 2023-08 起不支持 BNB Chain（现支持链名单里没有 BSC），所以 NFT 留在 BSC，铸造走自己网站，二级走 **OKX NFT 市场 / Element / Binance NFT**。上架资料与各平台版税设置见 `listing/README.md`。
 

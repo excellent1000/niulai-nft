@@ -16,16 +16,16 @@
 ## 文案
 
 **名称**：牛来 NFT（NIULAI）
-**一句话**：999 枚牛来 NFT，用 1000 $牛来 铸造，10% 版税每小时买入 $牛来 并自动打到持有者钱包。
+**一句话**：999 枚牛来 NFT，用 1 $牛来 铸造（每钱包 1 枚），10% 版税每小时买入 $牛来 并自动打到持有者钱包。
 
 **中文简介**
 > 牛来 NFT：基于 2026 年动画电影《牛来》角色的 999 枚 PFP，角色包括牛来、牛妈、豹拉、灵蛇、狼狗、云雀和路人牛，由 3 种姿势 × 5 种五官 × 13 件衣服 × 23 种配饰 × 17 个场景组合生成。
-> 铸造价 1000 $牛来 / 枚，铸造后立即显示。二级市场 10% 版税进入金库合约，每小时用 BNB 在 PancakeSwap 买入 $牛来（0xBEEA…7777），按 999 份直接转到每个持有者钱包，无需领取。
+> 铸造价 1 $牛来 / 枚（每钱包限 1 枚），铸造后立即显示。二级市场 10% 版税进入金库合约，每小时用 BNB 在 PancakeSwap 买入 $牛来（0xBEEA…7777），按 999 份直接转到每个持有者钱包，无需领取。
 > 稀有度：传说 ×4 / 史诗 ×19 / 稀有 ×122 / 普通 ×854。
 
 **English**
 > NIULAI is a 999-piece PFP collection based on the characters of the 2026 animated film 牛来 (Niu Lai): Niu Lai, Mother Cow, Bao La, Spirit Snake, the wolf-dogs, the lark and the herd — generated from 3 poses × 5 faces × 13 outfits × 23 accessories × 17 scenes.
-> Mint price: 1,000 $牛来 per NFT, instant reveal. 10% creator fee on every secondary sale flows into the vault contract, which buys $牛来 on PancakeSwap every hour and pushes it pro-rata straight to holders' wallets. No claiming.
+> Mint price: 1 $牛来 per NFT (1 per wallet), instant reveal. 10% creator fee on every secondary sale flows into the vault contract, which buys $牛来 on PancakeSwap every hour and pushes it pro-rata straight to holders' wallets. No claiming.
 
 **标签**：Movie · BNB Chain · Auto-dividend · $牛来
 

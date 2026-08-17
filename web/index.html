@@ -282,7 +282,7 @@ async function pickRpc() {
   ro = new ethers.JsonRpcProvider(roUrl, NET, { staticNetwork: NET, batchMaxCount: 1 });
   return ro;
 }
-let signer, account, unitPrice = 0n;
+let signer, account, unitPrice = 0n, maxQty = 5;
 const readProvider = () => (signer ? signer.provider : ro);
 const nftR = () => new ethers.Contract(CONFIG.nft, NFT_ABI, readProvider());
 const vaultR = () => new ethers.Contract(CONFIG.vault, VAULT_ABI, readProvider());
@@ -412,7 +412,7 @@ async function refresh() {
     failCount = 0;
     unitPrice = price;
     $('minted').textContent = supply; $('bar').style.width = `${Math.max(1.5, Number(supply) / 999 * 100)}%`;
-    $('price').textContent = `${fmt(price, 0)} 牛来`; $('maxPerWallet').textContent = mpw;
+    $('price').textContent = `${fmt(price, 0)} 牛来`; $('maxPerWallet').textContent = mpw; maxQty = Math.max(1, Number(mpw)); $('qty').max = maxQty; if (Number($('qty').value) > maxQty) { $('qty').value = maxQty; }
     $('saleState').textContent = pub ? '公售进行中' : al ? '白名单阶段' : '未开始';
     updateTotal();
     if (account) {
@@ -458,12 +458,12 @@ async function connect() {
 }
 async function approve() {
   const token = new ethers.Contract(CONFIG.token, ERC20_ABI, signer);
-  try { const qty = Math.max(1, Math.min(5, Number($('qty').value || 1))); const tx = await token.approve(CONFIG.nft, unitPrice * BigInt(qty));
+  try { const qty = Math.max(1, Math.min(maxQty, Number($('qty').value || 1))); const tx = await token.approve(CONFIG.nft, unitPrice * BigInt(qty));
     log('授权交易 ' + tx.hash); await tx.wait(); log('授权成功'); refresh(); }
   catch (e) { log('失败：' + (e.shortMessage || e.reason || e.message)); }
 }
 async function mint() {
-  const qty = Math.max(1, Math.min(5, Number($('qty').value || 1)));
+  const qty = Math.max(1, Math.min(maxQty, Number($('qty').value || 1)));
   const nft = new ethers.Contract(CONFIG.nft, NFT_ABI, signer);
   try { const tx = await nft.mint(qty); log(`Mint ${qty} 枚，交易 ${tx.hash}`); await tx.wait(); log('铸造成功'); refresh(); }
   catch (e) { log('失败：' + (e.shortMessage || e.reason || e.message)); }
@@ -474,7 +474,7 @@ async function distribute() {
   catch (e) { log('失败：' + (e.shortMessage || e.reason || e.message)); }
 }
 $('connect').onclick = connect; $('mintBtn').onclick = mint; $('approve').onclick = approve; $('distribute').onclick = distribute;
-$('plus').onclick = () => { $('qty').value = Math.min(5, Number($('qty').value) + 1); updateTotal(); refresh(); };
+$('plus').onclick = () => { $('qty').value = Math.min(maxQty, Number($('qty').value) + 1); updateTotal(); refresh(); };
 $('minus').onclick = () => { $('qty').value = Math.max(1, Number($('qty').value) - 1); updateTotal(); refresh(); };
 $('qty').oninput = () => { updateTotal(); refresh(); };
 pickRpc().then(refresh); if (DEPLOYED) setInterval(refresh, 30000);
