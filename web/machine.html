@@ -4,8 +4,8 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>牛来永动机</title>
-<link rel="icon" href="favicon.ico" sizes="any" />
-<link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png" />
+<link rel="icon" href="/favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="64x64" href="/favicon-64.png" />
 <meta property="og:title" content="牛来永动机" />
 <meta property="og:image" content="https://niulai.sbs/assets/og.jpg" />
 <meta name="theme-color" content="#0f0d0c" />
@@ -122,6 +122,11 @@
 
   #log { background:#0b0908; border:2px solid #000; padding:10px 12px; font:12px/1.6 var(--mono); color:var(--dim); max-height:150px; overflow:auto; margin-top:20px }
   .note { color:var(--dim); font-size:13px; margin-top:10px }
+  .pre { border:2px solid var(--yellow); background:#171204; padding:16px 18px; margin-bottom:22px; box-shadow:6px 6px 0 #000 }
+  .pre h3 { margin:0 0 6px; color:var(--yellow); font-size:19px }
+  .pre p { margin:0; font-size:13.5px; line-height:1.85; color:var(--dim) }
+  .pre b { color:var(--ink) }
+  body.pre-mode .trade .swap input, body.pre-mode .trade .swap button { opacity:.45; pointer-events:none }
   .flow { font:12px/1.9 var(--mono); color:var(--dim); background:#0b0908; border:2px solid #000; padding:12px 14px; white-space:pre; overflow-x:auto; margin-top:12px }
   .flow b { color:var(--yellow) }
 </style>
@@ -134,11 +139,18 @@
     <h1 class="shouchuo">牛来永动机<small>NIULAI STRATEGY · $NLSTR</small></h1>
     <div class="toolbar">
       <a class="tok" id="tokChip" href="#" title="点击复制">$NLSTR <span id="tokAddr">未部署</span></a>
-      <a class="tok" href="./">← 牛来 NFT</a>
+      <a class="tok" href="/">← 牛来 NFT</a>
       <a class="tok" href="https://x.com/Niulai_NFT" target="_blank" rel="noopener">X</a>
       <button class="btn" id="connect">连接钱包</button>
     </div>
   </header>
+
+  <div class="pre" id="preBanner" style="display:none">
+    <h3 class="shouchuo">尚未开盘</h3>
+    <p>$NLSTR 合约还没有部署，下面的数字都是空的，<b>现在市面上任何叫 "NLSTR / 牛来永动机" 的代币都不是我们的</b>。
+    开盘时间与合约地址会先发在 <a href="https://x.com/Niulai_NFT" target="_blank" rel="noopener" style="color:var(--yellow)">@Niulai_NFT</a>，
+    以本页显示的地址为准。这一页会在开盘那一刻自动开始显示行情。</p>
+  </div>
 
   <section class="hero">
     <h2 class="shouchuo" id="heroTitle">机器运转中</h2>
@@ -246,8 +258,8 @@
   <div id="log">等待连接节点…</div>
 </div>
 
-<script src="assets/ethers.umd.min.js"></script>
-<script src="assets/lwc.js"></script>
+<script src="/assets/ethers.umd.min.js"></script>
+<script src="/assets/lwc.js"></script>
 <script type="module">
 const { ethers } = window;
 const q = new URLSearchParams(location.search);
@@ -344,8 +356,27 @@ function renderFee() {
 }
 setInterval(renderFee, 1000);
 
+let preDone = false;
+function preLaunchUI() {
+  if (preDone) return;
+  preDone = true;
+  document.body.classList.add('pre-mode');
+  $('preBanner').style.display = 'block';
+  $('heroTitle').textContent = '等待开盘';
+  $('feeNow').textContent = '95% → 10%'; $('feeNow').className = '';
+  $('feeCountdown').textContent = '开盘后 5 分钟';
+  $('burned').textContent = '0'; $('toVault').textContent = '0 BNB';
+  $('chart').innerHTML = '<div class="empty" style="padding:70px 0">开盘后显示行情</div>';
+  $('swapBtn').textContent = '尚未开盘'; $('swapBtn').disabled = true;
+  $('supply').textContent = '10 亿枚';
+  $('markup').textContent = '1.35×'; $('step').textContent = '2%';
+  $('invEmpty').textContent = '开盘后金库才会开始收货';
+  $('bookEmpty').textContent = '开盘后金库会在 Element 上挂单';
+  log('合约尚未部署。想预览可加 ?treasury=0x..&nlstr=0x..&hook=0x..');
+}
+
 async function refresh() {
-  if (!DEPLOYED) { log('合约尚未部署。可用 ?treasury=0x..&nlstr=0x..&hook=0x.. 预览'); return; }
+  if (!DEPLOYED) { preLaunchUI(); return; }
   if (!ro && !signer) await pickRpc();
   try {
     const t = T(), h = H(), e = E();
@@ -713,8 +744,12 @@ async function doSwap() {
 $('swapBtn').onclick = doSwap;
 setSide('buy');
 
-pickRpc().then(refresh).then(loadBook).then(loadCandles);
-setInterval(() => { refresh(); loadBook(); loadCandles(); }, 30000);
+if (DEPLOYED) {
+  pickRpc().then(refresh).then(loadBook).then(loadCandles);
+  setInterval(() => { refresh(); loadBook(); loadCandles(); }, 30000);
+} else {
+  preLaunchUI();   // 没部署就别去连节点、别拉 candles/orders（只会 404）
+}
 </script>
 </body>
 </html>
