@@ -27,3 +27,4 @@ web/candles.json
 web/orders.json
 strategy/broadcast/
 strategy/cache/
+strategy/.env

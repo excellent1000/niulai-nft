@@ -21,3 +21,6 @@ remappings = [
 
 [rpc_endpoints]
 bsc = "${BSC_RPC_URL}"
+
+[etherscan]
+bsc = { key = "${BSCSCAN_API_KEY}", url = "https://api.bscscan.com/api", chain = 56 }
