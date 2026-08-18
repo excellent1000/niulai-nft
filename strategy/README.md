@@ -215,6 +215,25 @@ ssh root@2.24.118.196 'journalctl -u nlstr-keeper -f'       # 看日志
 
 `FROM_BLOCK` 记得设成开盘区块，否则 K 线只会有最近 5000 块。
 
+### 上线当天线上暴露的坑（都只有真跑才会出现）
+
+1. **`.wait()` 没有超时 → keeper 静默停摆**。一笔交易卡在内存池永不确认，`.wait()` 就永远不返回，
+   systemd 仍显示 active，日志静默 5 分钟没人知道。现在单笔 90s、整轮 240s（`Promise.race`）。
+2. **超时之后必须 `signer.reset()`**。超时不等于失败——交易可能稍后确认，`NonceManager`
+   的缓存就此错位，同一轮后面每一笔都连锁报 `nonce has already been used`。
+3. **三方共用一个钱包**（分红 keeper + 永动机 keeper + 人手 MetaMask）必然撞 nonce。
+   已给永动机 keeper 单独钱包 `0x74BCF1…71c6`，owner 私钥只留给 `setBidPrice`（`onlyOwner`）。
+4. **`listed` 只存内存 → 每次重启把全部库存重挂一遍**。7 次重启 = 47 笔交易只为 11 枚货。
+   改成落盘，并且**记的是挂单价而不是只记 id** —— 只记 id 的话柜台价上涨后旧的低价卖单
+   永远不会更新，等于在贱卖。
+5. **Element 成交不经过 `sellToTreasury`**，写在里面的 +2% 阶梯永远不触发，
+   而这是对外承诺的机制。keeper 在 `syncInventory` 发现入库后补调 `setBidPrice`。
+6. **旧买单从不撤销**，且 `committedWbnb` 是覆盖不是累加 —— 留着只会让一部分单
+   成交时因 WBNB 不足而失败。补挂前先撤上一批。
+
+存活哨兵 `server/nlstr-watchdog.sh`（cron 每 2 分钟）：日志静默超过 5 分钟就重启并记到
+`/var/log/nlstr-watchdog.log`。
+
 ### 装的时候踩到的三个坑
 
 1. **`candles.mjs` 的「缩小步长重试」是假的**：`STEP` 是模块级 const，失败时
