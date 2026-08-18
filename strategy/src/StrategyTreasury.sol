@@ -16,6 +16,7 @@ import {BalanceDelta} from "v4-core/src/types/BalanceDelta.sol";
 import {SwapParams, ModifyLiquidityParams} from "v4-core/src/types/PoolOperation.sol";
 import {TickMath} from "v4-core/src/libraries/TickMath.sol";
 import {CurrencySettler} from "./libraries/CurrencySettler.sol";
+import {IElementEx, IWBNB, NFTBuyOrder, NFTSellOrder, ElementSignature, Fee, Property} from "./ElementTypes.sol";
 
 interface IBurnable {
     function burn(uint256 amount) external;
@@ -48,6 +49,13 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     address public team;
     address public keeper;
 
+    // ---- Element 集成（让金库的买卖走市场合约，成交才计入成交量/地板价）
+    IElementEx public immutable element;
+    IWBNB public immutable wbnb;
+    uint256 public nextOrderNonce = 1;
+    mapping(bytes32 => bool) public approvedListings;   // ERC-1271 授权过的卖单哈希
+    bytes4 private constant ERC1271_MAGIC = 0x1626ba7e;
+
     PoolKey public poolKey;
     bool public poolKeySet;
 
@@ -70,6 +78,8 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     uint256 public totalNlstrBurned;
     uint256 public totalToVault;
     uint256 public totalToTeam;
+    uint256 public totalSaleProceedsBurned;
+    uint256 private _lastCollectedBnb;
 
     uint256[] private _inventory;
     mapping(uint256 => uint256) private _invIndexPlusOne;
@@ -85,6 +95,9 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     error NotAuthorized();
     error BadParam();
     error TransferFailed();
+    error PriceTooHigh();
+    error PriceTooLow();
+    error NotOwned();
 
     event FeesCollected(uint256 bnb, uint256 nlstr);
     event Split(uint256 toNftFund, uint256 toVault, uint256 toTeam);
@@ -92,15 +105,23 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     event SoldNft(address indexed buyer, uint256 indexed tokenId, uint256 price, uint256 royalty, uint256 burned);
     event NlstrBurned(uint256 amount);
     event BidUpdated(uint256 bidPrice);
+    event BuyOrdersPlaced(uint256 count, uint256 price, uint256 firstNonce);
+    event ListingApproved(uint256 indexed tokenId, uint256 price, bytes32 hash);
+    event OrderCancelled(uint256 nonce);
+    event InventoryAdded(uint256 indexed tokenId);
+    event InventoryRemoved(uint256 indexed tokenId);
 
     modifier onlyKeeperOrOwner() {
         if (msg.sender != keeper && msg.sender != owner()) revert NotAuthorized();
         _;
     }
 
-    constructor(IPoolManager _poolManager, IERC721 _nft, address _dividendVault, address _team, address _owner)
-        Ownable(_owner)
-    {
+    constructor(
+        IPoolManager _poolManager, IERC721 _nft, address _dividendVault, address _team, address _owner,
+        IElementEx _element, IWBNB _wbnb
+    ) Ownable(_owner) {
+        element = _element;
+        wbnb = _wbnb;
         poolManager = _poolManager;
         nft = _nft;
         dividendVault = _dividendVault;
@@ -168,8 +189,21 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     /// @notice 提取累计的 LP 手续费并按 80/10/10 分账；NLSTR 部分直接销毁。任何人可调用。
     function collectFees(int24 tickLower, int24 tickUpper) external nonReentrant {
         if (!poolKeySet) revert PoolKeyNotSet();
+        _lastCollectedBnb = 0;
         poolManager.unlock(abi.encode(Action.COLLECT, abi.encode(tickLower, tickUpper)));
-        _distribute();
+        _distribute(_lastCollectedBnb);
+        _burnNlstrBalance();
+    }
+
+    /// @notice 把「卖 NFT 得来的 BNB」买成 $NLSTR 并销毁（手续费不走这里，走 collectFees 的 80/10/10）
+    ///         余额里扣掉 nftFund 剩下的就是卖货所得。任何人可调用。
+    function processSaleProceeds() external nonReentrant {
+        uint256 amt = address(this).balance - nftFund;
+        if (amt == 0 || !poolKeySet) return;
+        poolManager.unlock(abi.encode(Action.BUY_BURN, abi.encode(amt)));
+        uint256 burned = IERC20(nlstr).balanceOf(address(this));
+        _burnNlstrBalance();
+        totalSaleProceedsBurned += burned;
     }
 
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
@@ -192,6 +226,7 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
             );
             uint256 b0 = fees.amount0() > 0 ? uint256(uint128(fees.amount0())) : 0;
             uint256 b1 = fees.amount1() > 0 ? uint256(uint128(fees.amount1())) : 0;
+            _lastCollectedBnb = b0;
             if (b0 > 0) poolKey.currency0.take(poolManager, address(this), b0);
             if (b1 > 0) poolKey.currency1.take(poolManager, address(this), b1);
             emit FeesCollected(b0, b1);
@@ -215,8 +250,7 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
 
     // ================================================================ 分账
 
-    function _distribute() internal {
-        uint256 bnb = address(this).balance - nftFund;
+    function _distribute(uint256 bnb) internal {
         if (bnb > 0) {
             uint256 toVault = bnb * vaultBps / 10_000;
             uint256 toTeam = bnb * teamBps / 10_000;
@@ -226,7 +260,6 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
             if (toTeam > 0) { _pay(team, toTeam); totalToTeam += toTeam; }
             emit Split(toFund, toVault, toTeam);
         }
-        _burnNlstrBalance();
     }
 
     function _burnNlstrBalance() internal {
@@ -299,7 +332,9 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
 
         if (forBurn > 0 && poolKeySet) {
             poolManager.unlock(abi.encode(Action.BUY_BURN, abi.encode(forBurn)));
+            uint256 b = IERC20(nlstr).balanceOf(address(this));
             _burnNlstrBalance();
+            totalSaleProceedsBurned += b;
         }
         emit SoldNft(msg.sender, tokenId, price, royalty, forBurn);
     }
@@ -327,7 +362,101 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
         return (nftFund, bidCost());
     }
 
-    function onERC721Received(address, address, uint256, bytes calldata) external pure returns (bytes4) {
+    function onERC721Received(address, address, uint256 tokenId, bytes calldata) external returns (bytes4) {
+        // Element 成交或任何人 safeTransfer 进来的牛来 NFT 自动入库
+        if (msg.sender == address(nft) && _invIndexPlusOne[tokenId] == 0) {
+            _inventory.push(tokenId);
+            _invIndexPlusOne[tokenId] = _inventory.length;
+        }
         return IERC721Receiver.onERC721Received.selector;
+    }
+
+    // ================================================================ Element 集成
+
+    /// @notice ERC-1271：Element 会回调这里校验金库挂的卖单
+    function isValidSignature(bytes32 hash, bytes calldata) external view returns (bytes4) {
+        return approvedListings[hash] ? ERC1271_MAGIC : bytes4(0);
+    }
+
+    /// @notice 在 Element 上挂 count 张「合集通吃」买单（一张只能成交一次，所以要多挂几张）
+    /// @dev 价格不得高于当前 bidPrice —— 即使 keeper 私钥泄露也无法高价乱买
+    function placeBuyOrders(uint256 count, uint256 price, uint256 expiry)
+        external onlyKeeperOrOwner nonReentrant
+    {
+        if (price > bidPrice || price == 0) revert PriceTooHigh();
+        if (count == 0 || count > 20) revert BadParam();
+        uint256 royalty = price * royaltyBps / 10_000;
+        uint256 need = (price + royalty) * count;
+        uint256 have = wbnb.balanceOf(address(this));
+        if (need > have) {
+            uint256 shortfall = need - have;
+            if (nftFund < shortfall) revert InsufficientFund();
+            nftFund -= shortfall;
+            wbnb.deposit{value: shortfall}();
+        }
+        wbnb.approve(address(element), type(uint256).max);
+
+        uint256 first = nextOrderNonce;
+        for (uint256 i = 0; i < count; i++) {
+            NFTBuyOrder memory o;
+            o.maker = address(this);
+            o.taker = address(0);
+            o.expiry = expiry;
+            o.nonce = nextOrderNonce++;
+            o.erc20Token = address(wbnb);
+            o.erc20TokenAmount = price;
+            o.fees = new Fee[](1);
+            o.fees[0] = Fee({recipient: dividendVault, amount: royalty, feeData: ""});
+            o.nft = address(nft);
+            o.nftId = 0;
+            o.nftProperties = new Property[](1);
+            o.nftProperties[0] = Property({propertyValidator: address(0), propertyData: ""});
+            element.preSignERC721BuyOrder(o);
+        }
+        emit BuyOrdersPlaced(count, price, first);
+    }
+
+    /// @notice 授权一张卖单（ERC-1271）。价格不得低于柜台价 —— keeper 无法低价甩卖
+    function approveListing(NFTSellOrder calldata o) external onlyKeeperOrOwner {
+        if (o.maker != address(this) || o.nft != address(nft)) revert BadParam();
+        if (_invIndexPlusOne[o.nftId] == 0) revert NotOwned();
+        if (o.erc20TokenAmount < askPrice()) revert PriceTooLow();
+        bytes32 h = element.getERC721SellOrderHash(o);
+        approvedListings[h] = true;
+        nft.setApprovalForAll(address(element), true);
+        emit ListingApproved(o.nftId, o.erc20TokenAmount, h);
+    }
+
+    function revokeListing(bytes32 h) external onlyKeeperOrOwner { approvedListings[h] = false; }
+
+    function cancelOrder(uint256 nonce) external onlyKeeperOrOwner {
+        element.cancelERC721Order(nonce);
+        emit OrderCancelled(nonce);
+    }
+
+    /// @notice 把闲置的 WBNB 换回 BNB 并回到收购基金（撤单/过期后调用）
+    function unwrapIdle() external {
+        uint256 bal = wbnb.balanceOf(address(this));
+        if (bal > 0) { wbnb.withdraw(bal); nftFund += bal; }
+    }
+
+    /// @notice 双向同步库存。Element 用 transferFrom 转 NFT（不触发 onERC721Received），
+    ///         所以成交后必须靠这个把账对上。任何人都可以调用。
+    function syncInventory(uint256[] calldata tokenIds) external {
+        for (uint256 i = 0; i < tokenIds.length; i++) {
+            uint256 id = tokenIds[i];
+            bool owned = nft.ownerOf(id) == address(this);
+            bool tracked = _invIndexPlusOne[id] != 0;
+            if (owned && !tracked) {
+                _inventory.push(id);
+                _invIndexPlusOne[id] = _inventory.length;
+                totalBought += 1;
+                emit InventoryAdded(id);
+            } else if (!owned && tracked) {
+                _removeFromInventory(id);
+                totalSold += 1;
+                emit InventoryRemoved(id);
+            }
+        }
     }
 }

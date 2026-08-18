@@ -18,7 +18,8 @@ $NLSTR 每笔 swap 抽 10%（开盘 95% 线性衰减，金库是唯一 LP 所以
 |---|---|
 | `src/NLSTR.sol` | 标准 ERC20，**零转账税**、固定总量、无铸造权限 |
 | `src/NLSTRHook.sol` | Uniswap v4 钩子：动态费率（95%→10%）、开盘单笔限额、**只有金库能加流动性** |
-| `src/StrategyTreasury.sol` | 提取手续费并分账；NFT 收单价做市；柜台转卖；买入销毁 NLSTR。**没有撤出流动性的函数 → LP 永久锁死** |
+| `src/StrategyTreasury.sol` | 提取手续费并分账；NFT 做市（自有柜台 + Element 链上挂单）；买入销毁 NLSTR。**没有撤出流动性的函数 → LP 永久锁死** |
+| `src/ElementTypes.sol` | Element ElementEx 的订单结构与接口 |
 
 ## 为什么用 v4 hook 而不是转账税
 
@@ -29,6 +30,24 @@ $NLSTR 每笔 swap 抽 10%（开盘 95% 线性衰减，金库是唯一 LP 所以
 | 费率衰减 | 笨重 | ✅ 钩子里按时间算 |
 | 费用去向 | 攒币→swap→BNB | ✅ 直接以 LP 手续费形式沉淀 |
 
+## Element 集成（无需任何 API key，已链上实证）
+
+| 能力 | 做法 | 实证 |
+|---|---|---|
+| 金库挂买单 | `placeBuyOrders(n, price, expiry)` → 链上 `preSignERC721BuyOrder`，合集通吃（propertyValidator=0）| ✅ 真实持有者可 `sellERC721` 卖入 |
+| 金库挂卖单 | `approveListing(order)` → ERC-1271，Element 回调 `isValidSignature` | ✅ 买家 `buyERC721Ex` 成交（signatureType 3/4）|
+| 成交是否计入市场数据 | — | ✅ **事件与真实成交字节级一致**（同合约同 topic `0x9c248aa1…`），索引器无法区分 |
+| 撤单 | `cancelOrder(nonce)` | ✅ 撤后无法成交 |
+
+**踩到的坑（已修）**：
+1. 一张买单只能成交一次（第二个 tokenId 报 `ORDER_NOT_FILL`）→ 必须同时挂多张不同 nonce
+2. Element 用 `transferFrom` 转 NFT，**不触发 `onERC721Received`** → 必须靠双向 `syncInventory()` 对账
+3. 买单的版税以 **WBNB** 支付（现有分红金库的 `harvest` 会自动 unwrap，无需处理）
+4. 手续费收入与卖货所得必须分开记账：前者走 80/10/10，后者走 `processSaleProceeds()` 买入销毁 NLSTR
+
+**风控**：`placeBuyOrders` 强制 `price ≤ bidPrice`，`approveListing` 强制 `price ≥ askPrice()`。
+即使 keeper 私钥泄露，攻击者既不能高价乱买、也不能低价甩卖。
+
 ## 主网 fork 演练
 
 ```bash
@@ -36,8 +55,13 @@ BSC_RPC_URL=<你的BSC节点> forge test -vv
 # 可调开盘曲线：TICK_UPPER=189300 TICK_LOWER=-887220 forge test --match-test test_08 -vv
 ```
 
-10 个用例覆盖：单边开盘 / 费率衰减 / 80-10-10 分账 / 收单价买 NFT 且阶梯上调 /
-柜台卖出并销毁 NLSTR / 流动性锁死 / 价格曲线 / 卖单税销毁 / 开盘防巨鲸。
+**22 个用例全部通过**，全部打真实合约（v4 PoolManager / Element ElementEx / 牛来 NFT / 分红金库）：
+
+- `ForkE2E`（12）单边开盘 · 费率衰减 · 80-10-10 分账 · 收单价阶梯 · 柜台买卖 · 流动性锁死 ·
+  价格曲线 · 卖单税销毁 · 开盘防巨鲸 · **完整飞轮走 Element**
+- `ElementFill`（3）合约挂卖单成交 · 带版税成交 · 成交事件与真实成交比对
+- `ElementBuyOrder`（5）链上挂买单 · 合集通吃 · 单张成交次数 · 撤单 · nonce 复用
+- `ElementProbe`（2）签名类型探测
 
 ## 开盘曲线参数（已定）
 
@@ -65,6 +89,7 @@ BSC_RPC_URL=<你的BSC节点> forge test -vv
 ## 未完成
 
 - [ ] 部署脚本 `script/Deploy.s.sol`（含 hook 地址挖矿）
+- [ ] keeper 脚本：补挂买单 / 挂卖单 / 调 syncInventory 与 processSaleProceeds
 - [ ] 空投名单与发放脚本
 - [ ] 网站面板：收单价 / 进度条 / 金库存货 / 销毁计数 / 柜台
 - [ ] 第三方审计（hook 与金库经手全部资金流，目前只有自测）

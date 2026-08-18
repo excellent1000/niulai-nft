@@ -21,12 +21,15 @@ import {HookMiner} from "v4-periphery/test/shared/HookMiner.sol";
 import {NLSTR} from "../src/NLSTR.sol";
 import {NLSTRHook} from "../src/NLSTRHook.sol";
 import {StrategyTreasury} from "../src/StrategyTreasury.sol";
+import {IElementEx, IWBNB, NFTBuyOrder, NFTSellOrder, ElementSignature, Fee, Property} from "../src/ElementTypes.sol";
 
 /// BSC 主网 fork 全链路演练：真实 v4 PoolManager + 真实牛来 NFT + 真实分红金库
 contract ForkE2E is Test {
     IPoolManager constant PM = IPoolManager(0x28e2Ea090877bF75740558f6BFB36A5ffeE9e9dF);
     IERC721 constant NFT = IERC721(0x5fd0d8FeCF408f61080cEa470249026d3e02fB3D);
     address constant DIVIDEND_VAULT = 0x311188bef22479edE7bd29b61a7aE7D84bA6B55C;
+    IElementEx constant ELEMENT = IElementEx(0xb3e3DfCb2d9f3DdE16d78B9e6EB3538Eb32B5ae1);
+    IWBNB constant WBNB = IWBNB(0xbb4CdB9CBd36B01bD1cBaEBF2De08d9173bc095c);
 
     int24 constant TICK_SPACING = 60;
     int24 TICK_UPPER; // 开盘价（越高 = NLSTR 越便宜 = 开盘 FDV 越低）
@@ -52,7 +55,7 @@ contract ForkE2E is Test {
         TICK_LOWER = int24(vm.envOr("TICK_LOWER", int256(-887_220)));
 
         nlstr = new NLSTR(address(this), SUPPLY);
-        treasury = new StrategyTreasury(PM, NFT, DIVIDEND_VAULT, team, address(this));
+        treasury = new StrategyTreasury(PM, NFT, DIVIDEND_VAULT, team, address(this), ELEMENT, WBNB);
         treasury.setNlstr(address(nlstr));
 
         // 挖 hook 地址（低 14 位必须编码权限）
@@ -282,5 +285,106 @@ contract ForkE2E is Test {
             console2.log(unicode"  开盘后(秒)/税率(pips)/0.4BNB买到(万枚)", ts[i], hook.currentFeePips(), got / 1e22);
             vm.revertToState(snap);
         }
+    }
+
+    /// ★ 完整飞轮：买币 → 手续费 → Element 买单收 NFT → Element 卖单出货 → 买入销毁 NLSTR
+    function test_12_fullFlywheelThroughElement() public {
+        vm.warp(block.timestamp + DECAY + 1);
+
+        // ① 有人买 NLSTR，产生 10% 手续费
+        vm.deal(buyer, 100 ether);
+        _buy(buyer, 10 ether);
+        uint256 vault0 = DIVIDEND_VAULT.balance;
+        treasury.collectFees(TICK_LOWER, TICK_UPPER);
+        console2.log(unicode"① 收 10 BNB 手续费 → 收购基金(wei)", treasury.nftFund());
+        console2.log(unicode"   分红池进账(wei)", DIVIDEND_VAULT.balance - vault0);
+        assertGt(treasury.nftFund(), 0.7 ether);
+
+        // ② 金库在 Element 挂 3 张合集通吃买单
+        treasury.setMarketConfig(1 ether, 200, 12_000);
+        treasury.setBidPrice(0.2 ether);
+        treasury.placeBuyOrders(3, 0.2 ether, block.timestamp + 7 days);
+        console2.log(unicode"② 已挂 3 张买单 @0.2 BNB，nonce 起始", treasury.nextOrderNonce() - 3);
+
+        // ③ 两个真实持有者通过 Element 卖给金库
+        uint256 vault1 = DIVIDEND_VAULT.balance;
+        uint256 filled;
+        for (uint256 n = treasury.nextOrderNonce() - 3; n < treasury.nextOrderNonce(); n++) {
+            uint256 tid = 50 + n % 30;
+            address h = NFT.ownerOf(tid);
+            if (h == address(treasury)) continue;
+            NFTBuyOrder memory o = _rebuildBuyOrder(n, 0.2 ether, block.timestamp + 7 days);
+            vm.startPrank(h);
+            NFT.setApprovalForAll(address(ELEMENT), true);
+            try ELEMENT.sellERC721(o, ElementSignature(1, 0, 0, 0), tid, true, "") {
+                filled++;
+                assertEq(NFT.ownerOf(tid), address(treasury));
+            } catch {}
+            vm.stopPrank();
+            if (filled == 2) break;
+        }
+        // Element 用 transferFrom，需要 syncInventory 把账对上
+        uint256[] memory got = new uint256[](30);
+        uint256 gn;
+        for (uint256 t = 50; t < 80; t++) { if (NFT.ownerOf(t) == address(treasury)) { got[gn++] = t; } }
+        uint256[] memory toSync = new uint256[](gn);
+        for (uint256 i = 0; i < gn; i++) toSync[i] = got[i];
+        treasury.syncInventory(toSync);
+        console2.log(unicode"③ 通过 Element 收到 NFT 枚数", filled);
+        console2.log(unicode"   sync 后金库库存", treasury.inventorySize());
+        console2.log(unicode"   分红池收到版税 WBNB(wei)", WBNB.balanceOf(DIVIDEND_VAULT));
+        assertGe(filled, 1, unicode"至少应收到一枚");
+        assertEq(treasury.inventorySize(), filled, unicode"syncInventory 应把 NFT 入库");
+        assertGt(WBNB.balanceOf(DIVIDEND_VAULT), 0, unicode"分红池应收到 WBNB 版税");
+
+        // ④ 金库挂卖单，买家通过 Element 买走
+        uint256[] memory inv = treasury.inventory();
+        uint256 sellId = inv[0];
+        uint256 ask = treasury.askPrice();
+        NFTSellOrder memory so;
+        so.maker = address(treasury); so.taker = address(0);
+        so.expiry = block.timestamp + 7 days; so.nonce = 777001;
+        so.erc20Token = 0xEeeeeEeeeEeEeeEeEeEeeEEEeeeeEeeeeeeeEEeE;
+        so.erc20TokenAmount = ask;
+        so.fees = new Fee[](1);
+        so.fees[0] = Fee({recipient: DIVIDEND_VAULT, amount: ask / 10, feeData: ""});
+        so.nft = address(NFT); so.nftId = sellId;
+        treasury.approveListing(so);
+
+        uint256 vault2 = DIVIDEND_VAULT.balance;
+        uint256 treasBal = address(treasury).balance;
+        vm.deal(arb, 10 ether);
+        vm.prank(arb);
+        ELEMENT.buyERC721Ex{value: ask + ask / 10}(so, ElementSignature(3, 27, 0, 0), arb, "");
+        console2.log(unicode"④ Element 卖出 #", sellId);
+        console2.log(unicode"   售价(wei)", ask);
+        console2.log(unicode"   金库进账(wei)", address(treasury).balance - treasBal);
+        console2.log(unicode"   分红池收到版税(wei)", DIVIDEND_VAULT.balance - vault2);
+        assertEq(NFT.ownerOf(sellId), arb);
+        assertEq(DIVIDEND_VAULT.balance - vault2, ask / 10);
+
+        // ⑤ 同步库存 + 分账（卖出所得进入 80/10/10 并销毁 NLSTR）
+        uint256[] memory ids = new uint256[](1); ids[0] = sellId;
+        treasury.syncInventory(ids);
+        assertEq(treasury.isForSale(sellId), false, unicode"库存应已清理");
+        uint256 supply0 = nlstr.totalSupply();
+        treasury.processSaleProceeds();
+        console2.log(unicode"⑤ 同步后库存", treasury.inventorySize());
+        console2.log(unicode"   卖货所得买入并销毁 NLSTR(万枚)", (supply0 - nlstr.totalSupply()) / 1e22);
+        assertGt(supply0 - nlstr.totalSupply(), 0, unicode"卖货所得应销毁 NLSTR");
+        console2.log(unicode"   累计进分红池(wei)", treasury.totalToVault());
+    }
+
+    function _rebuildBuyOrder(uint256 nonce, uint256 price, uint256 expiry)
+        internal view returns (NFTBuyOrder memory o)
+    {
+        o.maker = address(treasury); o.taker = address(0);
+        o.expiry = expiry; o.nonce = nonce;
+        o.erc20Token = address(WBNB); o.erc20TokenAmount = price;
+        o.fees = new Fee[](1);
+        o.fees[0] = Fee({recipient: DIVIDEND_VAULT, amount: price * 1000 / 10_000, feeData: ""});
+        o.nft = address(NFT); o.nftId = 0;
+        o.nftProperties = new Property[](1);
+        o.nftProperties[0] = Property({propertyValidator: address(0), propertyData: ""});
     }
 }
