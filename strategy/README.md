@@ -33,11 +33,24 @@ $NLSTR 每笔 swap 抽 10%（开盘 95% 线性衰减，金库是唯一 LP 所以
 
 ```bash
 BSC_RPC_URL=<你的BSC节点> forge test -vv
-# 可调开盘曲线：TICK_UPPER=173220 TICK_LOWER=92100 forge test --match-test test_08 -vv
+# 可调开盘曲线：TICK_UPPER=189300 TICK_LOWER=-887220 forge test --match-test test_08 -vv
 ```
 
 10 个用例覆盖：单边开盘 / 费率衰减 / 80-10-10 分账 / 收单价买 NFT 且阶梯上调 /
 柜台卖出并销毁 NLSTR / 流动性锁死 / 价格曲线 / 卖单税销毁 / 开盘防巨鲸。
+
+## 开盘曲线参数（已定）
+
+- `TICK_UPPER = 189300` → 开盘 FDV ≈ **6 BNB**
+- `TICK_LOWER = -887220`（最低可用 tick）→ **无 FDV 上限**
+  区间下界决定"价格最多能涨到哪"，设到最低即无上限，代价只是流动性少约 1%。
+
+实测曲线（净买入 → 已售出 / 边际 FDV）：
+1 BNB → 128M / 7 BNB · 5 BNB → 408M / 16 BNB · 10 BNB → 561M / 32 BNB ·
+20 BNB → 691M / 76 BNB · 50 BNB → 803M / 269 BNB
+
+卖出时币会回到池子（价格回落，别人又能买），但**卖单的 10% 手续费以 NLSTR 计价并被销毁**，
+所以每次卖出只有 90% 回池，10% 永久消失。
 
 ## 部署顺序
 

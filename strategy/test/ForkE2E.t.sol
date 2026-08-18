@@ -48,8 +48,8 @@ contract ForkE2E is Test {
 
     function setUp() public {
         vm.createSelectFork(vm.envString("BSC_RPC_URL"));
-        TICK_UPPER = int24(vm.envOr("TICK_UPPER", int256(173_220)));
-        TICK_LOWER = int24(vm.envOr("TICK_LOWER", int256(92_100)));
+        TICK_UPPER = int24(vm.envOr("TICK_UPPER", int256(189_300)));
+        TICK_LOWER = int24(vm.envOr("TICK_LOWER", int256(-887_220)));
 
         nlstr = new NLSTR(address(this), SUPPLY);
         treasury = new StrategyTreasury(PM, NFT, DIVIDEND_VAULT, team, address(this));
