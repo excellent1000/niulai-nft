@@ -19,6 +19,11 @@ const TICK_UPPER = Number(process.env.TICK_UPPER || 189300);
 const ONCE = process.env.ONCE === '1';
 const ORDERS_OUT = process.env.ORDERS_OUT || '';   // 写成 JSON 供网站读取
 
+if (!TREASURY || !process.env.KEEPER_PK) {
+  console.error('缺 TREASURY 或 KEEPER_PK —— 合约部署前别启动这个服务，否则只会每 20 秒崩一次刷日志');
+  process.exit(1);
+}
+
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const J = (o) => JSON.stringify(o, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
 

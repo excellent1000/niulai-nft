@@ -200,6 +200,32 @@ revert `BidDisabled`），整个飞轮是死的。不传 `INIT_BID` 部署脚本
 定价原则：**开在地板价下面**。收单价只涨不跌（每收一枚 +2%），开高了会被人瞬间倒货掏空基金；
 开低了它就是个慢慢往上爬的托底买单。加价 1.35× 之后要落在近期成交带里才卖得掉。
 
+## keeper 上服务器
+
+`./server/deploy-keeper.sh` 把 `keeper.mjs` + `candles.mjs` 装成两个 systemd 服务
+（`nlstr-keeper` / `nlstr-candles`），输出直接落到 `/var/www/niulai/nlstr/`，网站就能读到。
+装完是 **disabled** 状态——合约没部署就启动只会每 20 秒崩一次刷日志。
+
+```bash
+./server/deploy-keeper.sh                                   # 装代码 + unit（不启动）
+ssh root@2.24.118.196 'nano /opt/niulai/strategy/.env'      # 填 KEEPER_PK / TREASURY / NLSTR / HOOK
+./server/deploy-keeper.sh --restart                         # enable + start
+ssh root@2.24.118.196 'journalctl -u nlstr-keeper -f'       # 看日志
+```
+
+`FROM_BLOCK` 记得设成开盘区块，否则 K 线只会有最近 5000 块。
+
+### 装的时候踩到的三个坑
+
+1. **`candles.mjs` 的「缩小步长重试」是假的**：`STEP` 是模块级 const，失败时
+   `return sync()` 递归调用，步长根本没变，等于死循环。改成局部变量真的对半砍
+   （2500→1250→…→100）。
+2. **非法 `FROM_BLOCK` 会让它从头扫整条链**：我手滑传了个负数，它就老老实实准备扫
+   1.16 亿个区块，CPU 打满跑了十分钟。现在开扫前先校验并打印区块范围与请求数，
+   超过 500 次直接拒绝。
+3. **公共节点 `bsc-dataseed` 对 PoolManager 的 `getLogs` 直接拒**（`limit exceeded`，
+   降到 78 块还是拒）。服务器上得用付费节点。
+
 ## 主网 fork 演练
 
 ```bash
