@@ -105,8 +105,31 @@ SENDER_PK=.. NLSTR=.. BATCH_SENDER=.. node scripts/airdrop.mjs airdrop/alloc-<N>
 `scripts/keeper.mjs` 每分钟：提手续费分账 → 双向对账库存 →
 卖货所得回本金/烧利润 → 维持 N 张 Element 买单 → 给库存挂卖单 → 闲置 WBNB 换回。
 
-> 挂出的卖单需要把订单数据发布到网站上买家才能发现（我们不上 Element 订单簿，
-> 但成交走 Element 合约，成交量与地板价照常计入）。keeper 会把订单 JSON 打到日志里。
+> 买单和卖单都要把订单 JSON 发布到网站上，对手方才能发现（我们不上 Element 订单簿，
+> 但成交走 Element 合约，成交量与地板价照常计入）。keeper 会把 `BUY_ORDER` / `SELL_ORDER` 打到日志。
+
+### 实测一整圈（anvil BSC 分叉，真实 Element 合约）
+
+```
+keeper 挂 2 张买单 @0.2 BNB（链上 preSign，无 API）
+真实持有者 sellERC721 吃单 → #300 进金库，卖家净收 0.2，分红池 +0.02 WBNB 版税
+keeper syncInventory 入库 1，记成本 0.22（= 0.2 + 自付版税）
+keeper approveListing #300 → 净收 0.243（柜台价 0.27）
+买家 buyERC721Ex 付 0.27 → #300 到手，分红池 +0.027 BNB 版税
+keeper syncInventory 出库 1 → processSaleProceeds：
+    本金 0.22 回流收购基金，利润 0.023 → 销毁 1,369,807 枚 NLSTR
+库存清空，待回本金 0
+```
+
+**一枚 NFT 转一圈：分红池进账 0.047 BNB，销毁 137 万枚 NLSTR，本金全额回流。**
+
+### keeper 测试中挖出的 bug
+
+1. `inv.filter(async ...)` —— 异步回调过滤永远为真，出库对账完全失效
+2. **`unwrapIdle()` 每轮把挂单占用的 WBNB 全换回 BNB**，导致买单成交时报
+   `_transferERC20/TRANSFER_FAILED`。已在合约里加 `committedWbnb` 记账保护，
+   并提供 `cancelBuyOrders()` 撤单后一次性释放
+3. `JSON.stringify` 遇 BigInt 抛异常被外层 try 吞掉，订单数据根本没发布出去
 
 ## 主网 fork 演练
 
@@ -152,7 +175,7 @@ BSC_RPC_URL=<你的BSC节点> forge test -vv
 - [x] 部署脚本 `script/Deploy.s.sol`（含 hook 地址 CREATE2 挖矿）——
       anvil 主网分叉实测：**全新钱包只需 0.01 BNB，实际耗 gas 0.00032 BNB**
 - [x] 空投：快照 / 加权 / 批量发放脚本
-- [x] keeper 脚本（尚未在 fork 上端到端跑过，只做了语法检查）
+- [x] keeper 脚本 —— **anvil 主网分叉上端到端跑通一整圈**（见下）
 
 - [ ] 网站面板：收单价 / 进度条 / 金库存货 / 销毁计数 / 柜台
 - [ ] 第三方审计（hook 与金库经手全部资金流，目前只有自测）

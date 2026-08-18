@@ -54,6 +54,8 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     IWBNB public immutable wbnb;
     uint256 public nextOrderNonce = 1;
     address public hook;
+    /// 已包成 WBNB、承诺给未成交买单的金额。unwrapIdle 不会动这部分。
+    uint256 public committedWbnb;
     mapping(bytes32 => bool) public approvedListings;   // ERC-1271 授权过的卖单哈希
     bytes4 private constant ERC1271_MAGIC = 0x1626ba7e;
 
@@ -437,6 +439,7 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
             nftFund -= shortfall;
             wbnb.deposit{value: shortfall}();
         }
+        committedWbnb = need;
         wbnb.approve(address(element), type(uint256).max);
 
         pendingOrderCost = price + royalty;
@@ -480,8 +483,23 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
         emit OrderCancelled(nonce);
     }
 
-    /// @notice 把闲置的 WBNB 换回 BNB 并回到收购基金（撤单/过期后调用）
+    /// @notice 把**超出未成交买单所需**的 WBNB 换回 BNB。不会动 committedWbnb，
+    ///         否则会让已挂出的买单付不出钱（成交时报 TRANSFER_FAILED）。
     function unwrapIdle() external {
+        uint256 bal = wbnb.balanceOf(address(this));
+        if (bal <= committedWbnb) return;
+        uint256 idle = bal - committedWbnb;
+        wbnb.withdraw(idle);
+        nftFund += idle;
+    }
+
+    /// @notice 撤销全部未成交买单并释放占用的 WBNB（改价/收摊时用）
+    function cancelBuyOrders(uint256[] calldata nonces) external onlyKeeperOrOwner {
+        for (uint256 i = 0; i < nonces.length; i++) {
+            element.cancelERC721Order(nonces[i]);
+            emit OrderCancelled(nonces[i]);
+        }
+        committedWbnb = 0;
         uint256 bal = wbnb.balanceOf(address(this));
         if (bal > 0) { wbnb.withdraw(bal); nftFund += bal; }
     }
@@ -497,6 +515,9 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
                 _inventory.push(id);
                 _invIndexPlusOne[id] = _inventory.length;
                 if (costBasis[id] == 0) costBasis[id] = pendingOrderCost;
+                // 该买单已成交，释放它占用的额度
+                if (committedWbnb >= pendingOrderCost) committedWbnb -= pendingOrderCost;
+                else committedWbnb = 0;
                 totalBought += 1;
                 emit InventoryAdded(id);
             } else if (!owned && tracked) {

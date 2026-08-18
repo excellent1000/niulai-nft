@@ -18,6 +18,7 @@ const TICK_UPPER = Number(process.env.TICK_UPPER || 189300);
 const ONCE = process.env.ONCE === '1';
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
+const J = (o) => JSON.stringify(o, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
 
 const T_ABI = [
   'function bidPrice() view returns (uint256)',
@@ -36,6 +37,8 @@ const T_ABI = [
   'function processSaleProceeds()',
   'function collectFees(int24 lo, int24 hi)',
   'function unwrapIdle()',
+  'function committedWbnb() view returns (uint256)',
+  'function cancelBuyOrders(uint256[] nonces)',
   'function approvedListings(bytes32) view returns (bool)',
 ];
 const EX_ABI = ['function getERC721SellOrderHash((address,address,uint256,uint256,address,uint256,(address,uint256,bytes)[],address,uint256) o) view returns (bytes32)'];
@@ -56,23 +59,30 @@ async function tick() {
   try { await (await T.collectFees(TICK_LOWER, TICK_UPPER)).wait(); log('collectFees ✔'); }
   catch (e) { /* 没有手续费可提时会静默失败，正常 */ }
 
-  // ② 对账：把 Element 成交造成的库存变化同步进合约
+  // ② 对账：把 Element 成交造成的库存变化同步进合约（双向）
   const inv = (await T.inventory()).map(Number);
-  const candidates = new Set(inv);
-  // 抽查全集合里属于金库的（Element 买单成交后 NFT 会直接到账但合约不知道）
+  const invSet = new Set(inv);
+  const ownedNow = new Set();
   for (let i = 1; i <= 999; i += 200) {
     const ids = Array.from({ length: Math.min(200, 1000 - i) }, (_, k) => i + k);
     const owners = await Promise.all(ids.map(id => nft.ownerOf(id).catch(() => null)));
-    owners.forEach((o, k) => { if (o && o.toLowerCase() === TREASURY.toLowerCase()) candidates.add(ids[k]); });
+    owners.forEach((o, k) => { if (o && o.toLowerCase() === TREASURY.toLowerCase()) ownedNow.add(ids[k]); });
   }
-  const needSync = [...candidates].filter(id => !inv.includes(id) || false);
-  const stale = inv.filter(async id => (await nft.ownerOf(id)).toLowerCase() !== TREASURY.toLowerCase());
-  const toSync = [...new Set([...needSync, ...stale])];
-  if (toSync.length) { await (await T.syncInventory(toSync)).wait(); log(`syncInventory ${toSync.length} 枚`); }
+  const toAdd = [...ownedNow].filter(id => !invSet.has(id));      // 收到了但合约不知道
+  const toRemove = inv.filter(id => !ownedNow.has(id));           // 卖掉了但合约还记着
+  const toSync = [...toAdd, ...toRemove];
+  if (toSync.length) {
+    await (await T.syncInventory(toSync)).wait();
+    log(`syncInventory：入库 ${toAdd.length}，出库 ${toRemove.length}`);
+    toRemove.forEach(id => listed.delete(id));
+  }
 
   // ③ 卖货所得：先回本金，只烧利润
-  if (await T.pendingPrincipal() > 0n || true) {
-    try { await (await T.processSaleProceeds()).wait(); log('processSaleProceeds ✔'); } catch {}
+  const bal = await provider.getBalance(TREASURY);
+  const fundNow = await T.nftFund();
+  if (bal > fundNow) {
+    await (await T.processSaleProceeds()).wait();
+    log(`processSaleProceeds ${ethers.formatEther(bal - fundNow)} BNB`);
   }
 
   // ④ 维持 N 张 Element 买单
@@ -82,9 +92,18 @@ async function tick() {
     const n = Math.min(OPEN_ORDERS, affordable);
     if (n > 0) {
       const expiry = Math.floor(Date.now() / 1000) + TTL;
+      const firstNonce = Number(await T.nextOrderNonce());
+      const roy = (bid * BigInt(await T.royaltyBps())) / 10000n;
+      const vault0 = await T.dividendVault();
       await (await T.placeBuyOrders(n, bid, expiry)).wait();
       log(`挂 ${n} 张买单 @${ethers.formatEther(bid)} BNB（基金 ${ethers.formatEther(fund)}）`);
-    } else log(`收购基金不足（${ethers.formatEther(fund)} < ${ethers.formatEther(cost)}），暂不挂买单`);
+      // 买单必须公布出去，卖家才能调 Element 的 sellERC721 吃单
+      for (let k = 0; k < n; k++) {
+        const order = [TREASURY, ethers.ZeroAddress, expiry, firstNonce + k, WBNB, bid,
+                       [[vault0, roy, '0x']], NFT, 0, [[ethers.ZeroAddress, '0x']]];
+        console.log('  BUY_ORDER', J({ nonce: firstNonce + k, price: bid, order }));
+      }
+    } else if (OPEN_ORDERS > 0) log(`收购基金不足（${ethers.formatEther(fund)} < 单枚成本 ${ethers.formatEther(cost)}），暂不挂买单`);
   }
 
   // ⑤ 库存挂卖单
@@ -104,11 +123,11 @@ async function tick() {
       listed.add(id);
       log(`挂卖单 #${id} 净收 ${ethers.formatEther(net)} BNB  hash ${h.slice(0, 12)}…`);
       // 订单数据需要发布出去（网站/事件）才能被买家发现
-      console.log('  ORDER', JSON.stringify({ tokenId: id, order: order.map(String), hash: h }));
+      console.log('  SELL_ORDER', J({ tokenId: id, hash: h, order }));
     } catch (e) { log(`挂卖单 #${id} 失败: ${(e.shortMessage || e.message).slice(0, 80)}`); }
   }
 
-  // ⑥ 闲置 WBNB 换回 BNB
+  // ⑥ 把**超出挂单占用**的 WBNB 换回 BNB（合约里有 committedWbnb 保护，不会挖空未成交的买单）
   try { await (await T.unwrapIdle()).wait(); } catch {}
 }
 
