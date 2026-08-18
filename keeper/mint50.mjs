@@ -12,7 +12,7 @@ import { ethers } from 'ethers';
 
 // 读同目录 .env（不覆盖已有环境变量），可放 RPC_URL / OWNER_PK / FUNDER_PK
 try { for (const l of fs.readFileSync(fileURLToPath(new URL('./.env', import.meta.url)), 'utf8').split('\n')) { const m = l.match(/^\s*([A-Z_]+)\s*=\s*(.*)\s*$/); if (m && !(m[1] in process.env)) process.env[m[1]] = m[2]; } } catch {}
-const RPC = process.env.RPC_URL || 'https://bsc-dataseed.bnbchain.org';
+const RPC = process.env.RPC_URL || 'https://lb.drpc.live/bsc/AsVs23QoLEOwisC7Py3FTOo-9Orrf6UR8a6vijtBrJVX';
 const NFT = process.env.NFT || '0x5fd0d8FeCF408f61080cEa470249026d3e02fB3D';
 const TOKEN = process.env.TOKEN || '0xBEEA1D618e533a387D941F58a7d4c9b7bD377777';
 const WALLETS = process.env.WALLETS;

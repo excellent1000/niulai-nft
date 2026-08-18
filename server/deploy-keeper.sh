@@ -20,7 +20,7 @@ cd $APP
 # .env 只在第一次创建，之后不覆盖（里面有私钥）
 if [ ! -f $APP/.env ]; then
   cat > $APP/.env <<'ENV'
-RPC_URL=https://bsc-dataseed.bnbchain.org
+RPC_URL=https://lb.drpc.live/bsc/AsVs23QoLEOwisC7Py3FTOo-9Orrf6UR8a6vijtBrJVX
 KEEPER_PK=
 # 下面三个从 Deploy 脚本的输出里抄
 TREASURY=
@@ -60,7 +60,14 @@ echo "unit 已就位：nlstr-keeper / nlstr-candles"
 EOF
 
 if [ "${1:-}" = "--restart" ]; then
-  ssh "$HOST" "systemctl enable --now nlstr-keeper nlstr-candles && sleep 3 && systemctl is-active nlstr-keeper nlstr-candles"
+  # 地址没填就启动 = 每 20 秒崩一次刷日志，不如直接拦住
+  MISSING=$(ssh "$HOST" "grep -E '^(KEEPER_PK|TREASURY|NLSTR|HOOK)=\$' $APP/.env | cut -d= -f1 | tr '\n' ' '")
+  if [ -n "$MISSING" ]; then
+    echo "✗ $APP/.env 里这些还是空的：$MISSING"
+    echo "  TREASURY/NLSTR/HOOK 要等合约部署完才有，填好再来。没启动任何服务。"
+    exit 1
+  fi
+  ssh "$HOST" "systemctl enable --now nlstr-keeper nlstr-candles && sleep 5 && systemctl is-active nlstr-keeper nlstr-candles"
 else
   echo
   echo "代码和 unit 装好了，但**没有启动**——合约还没部署，启动只会刷错误日志。"

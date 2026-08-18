@@ -7,7 +7,7 @@
 import 'dotenv/config';
 import { ethers } from 'ethers';
 
-const RPC_URL = process.env.RPC_URL || 'https://bsc-dataseed.binance.org';
+const RPC_URL = process.env.RPC_URL || 'https://lb.drpc.live/bsc/AsVs23QoLEOwisC7Py3FTOo-9Orrf6UR8a6vijtBrJVX';
 const KEEPER_PK = process.env.KEEPER_PK;
 const VAULT = process.env.VAULT;
 const QUOTER = process.env.QUOTER || '0xB048Bbc1Ee6b733FFfCFb9e9CeF7375518e25997'; // PancakeSwap V3 QuoterV2 (BSC)

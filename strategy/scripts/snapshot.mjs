@@ -4,7 +4,7 @@
 import fs from 'node:fs';
 import { ethers } from 'ethers';
 
-const RPC = process.env.RPC_URL || 'https://bsc-dataseed.bnbchain.org';
+const RPC = process.env.RPC_URL || 'https://lb.drpc.live/bsc/AsVs23QoLEOwisC7Py3FTOo-9Orrf6UR8a6vijtBrJVX';
 const NFT = process.env.NFT || '0x5fd0d8FeCF408f61080cEa470249026d3e02fB3D';
 const SUPPLY_NFT = 999;
 const EXCLUDE = new Set([

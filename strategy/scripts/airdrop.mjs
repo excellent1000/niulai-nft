@@ -6,7 +6,7 @@ import { ethers } from 'ethers';
 
 const file = process.argv[2];
 if (!file) { console.error('用法: node scripts/airdrop.mjs <alloc.json>'); process.exit(1); }
-const RPC = process.env.RPC_URL || 'https://bsc-dataseed.bnbchain.org';
+const RPC = process.env.RPC_URL || 'https://lb.drpc.live/bsc/AsVs23QoLEOwisC7Py3FTOo-9Orrf6UR8a6vijtBrJVX';
 const BATCH = Number(process.env.BATCH || 100);
 const DRY = process.env.DRY === '1';
 

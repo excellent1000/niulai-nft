@@ -208,7 +208,7 @@ revert `BidDisabled`），整个飞轮是死的。不传 `INIT_BID` 部署脚本
 
 ```bash
 ./server/deploy-keeper.sh                                   # 装代码 + unit（不启动）
-ssh root@2.24.118.196 'nano /opt/niulai/strategy/.env'      # 填 KEEPER_PK / TREASURY / NLSTR / HOOK
+ssh -t root@2.24.118.196 'TERM=xterm-256color nano /opt/niulai/strategy/.env'   # 填 KEEPER_PK / TREASURY / NLSTR / HOOK / FROM_BLOCK
 ./server/deploy-keeper.sh --restart                         # enable + start
 ssh root@2.24.118.196 'journalctl -u nlstr-keeper -f'       # 看日志
 ```

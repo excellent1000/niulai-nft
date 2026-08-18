@@ -4,7 +4,7 @@
 #   */10 * * * * /opt/niulai/okx-refresh.sh >> /var/log/okx-refresh.log 2>&1
 set -euo pipefail
 NFT=${NFT:-0x5fd0d8fecf408f61080cea470249026d3e02fb3d}
-RPC=${RPC:-https://bsc-dataseed.bnbchain.org}
+RPC=${RPC:-https://lb.drpc.live/bsc/AsVs23QoLEOwisC7Py3FTOo-9Orrf6UR8a6vijtBrJVX}
 STATE=${STATE:-/opt/niulai/okx-refresh.last}
 last=$(cat "$STATE" 2>/dev/null || echo 0)
 hex=$(curl -s -m 15 "$RPC" -H 'Content-Type: application/json' --data "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"eth_call\",\"params\":[{\"to\":\"$NFT\",\"data\":\"0x18160ddd\"},\"latest\"]}" | sed -n 's/.*"result":"0x\([0-9a-f]*\)".*/\1/p')

@@ -6,7 +6,7 @@
 import fs from 'node:fs';
 import { ethers } from 'ethers';
 
-const RPC = process.env.RPC_URL || 'https://bsc-dataseed.bnbchain.org';
+const RPC = process.env.RPC_URL || 'https://lb.drpc.live/bsc/AsVs23QoLEOwisC7Py3FTOo-9Orrf6UR8a6vijtBrJVX';
 const PM = process.env.POOL_MANAGER || '0x28e2Ea090877bF75740558f6BFB36A5ffeE9e9dF';
 // poolId = keccak256(abi.encode(poolKey))。给了 NLSTR+HOOK 就自己算，省得手抄一串 bytes32 抄错。
 const POOL_ID = process.env.POOL_ID || (process.env.NLSTR && process.env.HOOK
