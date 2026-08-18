@@ -62,6 +62,26 @@ $NLSTR 每笔 swap 抽 10%（开盘 95% 线性衰减，金库是唯一 LP 所以
 **风控**：`placeBuyOrders` 强制 `price ≤ bidPrice`，`approveListing` 强制 `price ≥ askPrice()`。
 即使 keeper 私钥泄露，攻击者既不能高价乱买、也不能低价甩卖。
 
+## 免税白名单
+
+代币本身**零转账税**，所以转账/空投/进出交易所本来就免费；白名单只影响池子里 swap 的费率。
+
+v4 的 `beforeSwap` 拿到的 `sender` 是**调用 PoolManager 的合约（路由器）**，不是最终用户，因此有两种模式：
+
+| 模式 | 做法 | 实测（同样花 1 BNB）|
+|---|---|---|
+| 只白名单钱包地址 | `setFeeExempt(wallet, true)` | ❌ 无效，12830 万枚（和缴税一样）|
+| 开启 `originExempt` 后白名单钱包 | 再 `setOriginExempt(true)` | ✅ 14033 万枚（+9.4%）|
+| 白名单路由器本身 | `setFeeExempt(router, true)` | ✅ 14033 万枚（但**该路由器上所有人都免税**）|
+| 白名单金库自己 | `setFeeExempt(treasury, true)` | ✅ 同样的钱多烧约 10% 的 NLSTR |
+
+**信任设计**：名单公开可查（`exemptList` / `exemptCount`），并提供
+`renounceExemptControl()` 永久放弃「新增免税地址」的权力——上线后调用可以彻底堵死
+"团队偷偷加白名单砸盘"的质疑。已有地址仍可移除，只是不能再加。
+
+> ⚠️ 免税名单是最容易被社区攻击的点。建议只豁免**金库自己**（让回购销毁更高效），
+> 开盘后立刻 `renounceExemptControl()`，并把这件事写进公告。
+
 ## 主网 fork 演练
 
 ```bash
@@ -69,10 +89,10 @@ BSC_RPC_URL=<你的BSC节点> forge test -vv
 # 可调开盘曲线：TICK_UPPER=189300 TICK_LOWER=-887220 forge test --match-test test_08 -vv
 ```
 
-**24 个用例全部通过**，全部打真实合约（v4 PoolManager / Element ElementEx / 牛来 NFT / 分红金库）：
+**26 个用例全部通过**，全部打真实合约（v4 PoolManager / Element ElementEx / 牛来 NFT / 分红金库）：
 
-- `ForkE2E`（14）单边开盘 · 费率衰减 · 80-10-10 分账 · 收单价阶梯 · 柜台买卖 · 流动性锁死 ·
-  价格曲线 · 卖单税销毁 · 开盘防巨鲸 · **完整飞轮走 Element** · 亏本卖出处理 · 单圈资金守恒
+- `ForkE2E`（16）单边开盘 · 费率衰减 · 80-10-10 分账 · 收单价阶梯 · 柜台买卖 · 流动性锁死 ·
+  价格曲线 · 卖单税销毁 · 开盘防巨鲸 · **完整飞轮走 Element** · 亏本卖出处理 · 单圈资金守恒 · 免税白名单两种模式 · 金库免税回购
 - `ElementFill`（3）合约挂卖单成交 · 带版税成交 · 成交事件与真实成交比对
 - `ElementBuyOrder`（5）链上挂买单 · 合集通吃 · 单张成交次数 · 撤单 · nonce 复用
 - `ElementProbe`（2）签名类型探测

@@ -53,6 +53,7 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     IElementEx public immutable element;
     IWBNB public immutable wbnb;
     uint256 public nextOrderNonce = 1;
+    address public hook;
     mapping(bytes32 => bool) public approvedListings;   // ERC-1271 授权过的卖单哈希
     bytes4 private constant ERC1271_MAGIC = 0x1626ba7e;
 
@@ -189,6 +190,21 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     }
 
     function setKeeper(address k) external onlyOwner { keeper = k; }
+
+    /// @notice 转发到 hook 的免税名单管理（hook 只认金库地址）
+    function hookSetFeeExempt(address account, bool exempt) external onlyOwner {
+        (bool ok,) = hook.call(abi.encodeWithSignature("setFeeExempt(address,bool)", account, exempt));
+        if (!ok) revert TransferFailed();
+    }
+    function hookSetOriginExempt(bool enabled) external onlyOwner {
+        (bool ok,) = hook.call(abi.encodeWithSignature("setOriginExempt(bool)", enabled));
+        if (!ok) revert TransferFailed();
+    }
+    function hookRenounceExemptControl() external onlyOwner {
+        (bool ok,) = hook.call(abi.encodeWithSignature("renounceExemptControl()"));
+        if (!ok) revert TransferFailed();
+    }
+    function setHook(address h) external onlyOwner { if (hook != address(0)) revert BadParam(); hook = h; }
     function setTeam(address t) external onlyOwner { if (t == address(0)) revert BadParam(); team = t; }
 
     /// @notice 任何人都可以给收购基金充值（也用于开盘前注入启动资金）

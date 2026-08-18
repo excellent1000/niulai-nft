@@ -74,6 +74,7 @@ contract ForkE2E is Test {
             tickSpacing: TICK_SPACING,
             hooks: IHooks(address(hook))
         });
+        treasury.setHook(address(hook));
         treasury.setPoolKey(key);
         PM.initialize(key, TickMath.getSqrtPriceAtTick(TICK_UPPER));
 
@@ -91,7 +92,7 @@ contract ForkE2E is Test {
 
     function _buy(address who, uint256 bnbIn) internal returns (uint256 got) {
         uint256 before = nlstr.balanceOf(who);
-        vm.prank(who);
+        vm.prank(who, who);   // 同时设定 msg.sender 与 tx.origin（真实 EOA 的情形）
         router.swap{value: bnbIn}(
             key,
             SwapParams({zeroForOne: true, amountSpecified: -int256(bnbIn), sqrtPriceLimitX96: TickMath.MIN_SQRT_PRICE + 1}),
@@ -456,5 +457,79 @@ contract ForkE2E is Test {
         console2.log(unicode"累计进分红池(wei)", treasury.totalToVault());
         // 本金全回来了，基金应回到起点附近（差额 = 付出去的版税）
         assertGe(treasury.nftFund(), fundStart * 99 / 100, unicode"本金应基本回流");
+    }
+
+    /// 免税白名单：sender 模式 vs tx.origin 模式的真实差别（每种情形都从同一价格起跑）
+    function test_15_feeExemptWhitelist() public {
+        vm.warp(block.timestamp + DECAY + 1);
+        vm.deal(buyer, 200 ether);
+
+        uint256 snap = vm.snapshotState();
+        uint256 normal = _buy(buyer, 1 ether);
+        vm.revertToState(snap);
+
+        // ① 只把「买家钱包」加进名单——但他走的是路由器，sender 是路由器，所以无效
+        treasury.hookSetFeeExempt(buyer, true);
+        uint256 walletOnly = _buy(buyer, 1 ether);
+        vm.revertToState(snap);
+
+        // ② 打开 tx.origin 模式后才真正免税
+        treasury.hookSetFeeExempt(buyer, true);
+        treasury.hookSetOriginExempt(true);
+        uint256 originMode = _buy(buyer, 1 ether);
+        vm.revertToState(snap);
+
+        // ③ 直接把路由器加进名单（sender 模式）也有效
+        treasury.hookSetFeeExempt(address(router), true);
+        uint256 routerMode = _buy(buyer, 1 ether);
+        vm.revertToState(snap);
+
+        console2.log(unicode"同样花 1 BNB 能买到多少（万枚）：");
+        console2.log(unicode"  ① 正常缴 10% 税        ", normal / 1e22);
+        console2.log(unicode"  ② 只白名单钱包(走路由器)", walletOnly / 1e22);
+        console2.log(unicode"  ③ 开启 tx.origin 模式   ", originMode / 1e22);
+        console2.log(unicode"  ④ 白名单路由器本身      ", routerMode / 1e22);
+        assertApproxEqRel(walletOnly, normal, 0.01e18, unicode"只白名单钱包应当无效");
+        assertGt(originMode, normal * 108 / 100, unicode"origin 模式应免掉 10% 税");
+        assertGt(routerMode, normal * 108 / 100, unicode"白名单路由器应免税");
+
+        // ④ 放弃权限后不能再新增
+        treasury.hookRenounceExemptControl();
+        vm.expectRevert();
+        treasury.hookSetFeeExempt(makeAddr("someone"), true);
+        console2.log(unicode"  放弃权限后无法新增免税地址，当前名单长度", hook.exemptCount());
+    }
+
+    /// 金库自己 buy&burn 免税后，同样的钱能烧掉更多
+    function test_16_treasuryExemptBurnsMore() public {
+        vm.warp(block.timestamp + DECAY + 1);
+        vm.deal(buyer, 100 ether);
+        _buy(buyer, 10 ether);
+        treasury.collectFees(TICK_LOWER, TICK_UPPER);
+        treasury.setMarketConfig(1 ether, 200, 13_500);
+        treasury.setBidPrice(0.2 ether);
+
+        uint256 snap = vm.snapshotState();
+        // 不免税
+        _oneCycle(200);
+        uint256 burnedTaxed = nlstr.totalSupply();
+        vm.revertToState(snap);
+        // 免税
+        treasury.hookSetFeeExempt(address(treasury), true);
+        _oneCycle(200);
+        uint256 burnedExempt = nlstr.totalSupply();
+
+        console2.log(unicode"金库付税时共销毁(万枚)", (1_000_000_000 ether - burnedTaxed) / 1e22);
+        console2.log(unicode"金库免税时共销毁(万枚)", (1_000_000_000 ether - burnedExempt) / 1e22);
+        console2.log(unicode"免税多烧(万枚)", (burnedTaxed - burnedExempt) / 1e22);
+        assertLt(burnedExempt, burnedTaxed, unicode"免税应烧掉更多");
+    }
+
+    function _oneCycle(uint256 tokenId) internal {
+        address h = NFT.ownerOf(tokenId);
+        vm.startPrank(h); NFT.approve(address(treasury), tokenId); treasury.sellToTreasury(tokenId); vm.stopPrank();
+        vm.deal(arb, 10 ether);
+        vm.prank(arb);
+        treasury.buyFromTreasury{value: treasury.askPrice()}(tokenId);
     }
 }
