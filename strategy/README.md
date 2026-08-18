@@ -39,11 +39,25 @@ $NLSTR 每笔 swap 抽 10%（开盘 95% 线性衰减，金库是唯一 LP 所以
 | 成交是否计入市场数据 | — | ✅ **事件与真实成交字节级一致**（同合约同 topic `0x9c248aa1…`），索引器无法区分 |
 | 撤单 | `cancelOrder(nonce)` | ✅ 撤后无法成交 |
 
+### 做市加价必须盖过两头版税（测试挖出来的经济学 bug）
+
+金库买入付 `bid × (1+r)`（自付版税），卖出只到手 `ask × (1−r)`，所以必须
+`markup × (1−r) > (1+r)`，即 **markup > (1+r)/(1−r)**。r=10% 时至少 1.223×。
+原来默认的 1.2× 每转一圈是**亏钱**的。现已把默认改为 **1.35×**，
+并在 `setMarketConfig` 里用 `minMarkupBps()` 强制校验，设不出必亏的参数。
+
+| 版税 r | 保本最低加价 | 建议加价 | 单圈毛利 |
+|---|---|---|---|
+| 5% | 1.106× | 1.25× | ≈ 13% |
+| 10% | 1.223× | 1.35× | ≈ 10% |
+
 **踩到的坑（已修）**：
 1. 一张买单只能成交一次（第二个 tokenId 报 `ORDER_NOT_FILL`）→ 必须同时挂多张不同 nonce
 2. Element 用 `transferFrom` 转 NFT，**不触发 `onERC721Received`** → 必须靠双向 `syncInventory()` 对账
 3. 买单的版税以 **WBNB** 支付（现有分红金库的 `harvest` 会自动 unwrap，无需处理）
-4. 手续费收入与卖货所得必须分开记账：前者走 80/10/10，后者走 `processSaleProceeds()` 买入销毁 NLSTR
+4. 手续费收入与卖货所得必须分开记账：前者走 80/10/10，后者走 `processSaleProceeds()`
+5. 卖货所得**先回本金再烧利润**：`costBasis[tokenId]` 记每枚成本，卖出后本金回流 `nftFund` 继续买 NFT，
+   只有盈利部分买入并销毁 $NLSTR；亏本卖出时全部回流、不销毁
 
 **风控**：`placeBuyOrders` 强制 `price ≤ bidPrice`，`approveListing` 强制 `price ≥ askPrice()`。
 即使 keeper 私钥泄露，攻击者既不能高价乱买、也不能低价甩卖。
@@ -55,10 +69,10 @@ BSC_RPC_URL=<你的BSC节点> forge test -vv
 # 可调开盘曲线：TICK_UPPER=189300 TICK_LOWER=-887220 forge test --match-test test_08 -vv
 ```
 
-**22 个用例全部通过**，全部打真实合约（v4 PoolManager / Element ElementEx / 牛来 NFT / 分红金库）：
+**24 个用例全部通过**，全部打真实合约（v4 PoolManager / Element ElementEx / 牛来 NFT / 分红金库）：
 
-- `ForkE2E`（12）单边开盘 · 费率衰减 · 80-10-10 分账 · 收单价阶梯 · 柜台买卖 · 流动性锁死 ·
-  价格曲线 · 卖单税销毁 · 开盘防巨鲸 · **完整飞轮走 Element**
+- `ForkE2E`（14）单边开盘 · 费率衰减 · 80-10-10 分账 · 收单价阶梯 · 柜台买卖 · 流动性锁死 ·
+  价格曲线 · 卖单税销毁 · 开盘防巨鲸 · **完整飞轮走 Element** · 亏本卖出处理 · 单圈资金守恒
 - `ElementFill`（3）合约挂卖单成交 · 带版税成交 · 成交事件与真实成交比对
 - `ElementBuyOrder`（5）链上挂买单 · 合集通吃 · 单张成交次数 · 撤单 · nonce 复用
 - `ElementProbe`（2）签名类型探测

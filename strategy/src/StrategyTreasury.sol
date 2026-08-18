@@ -68,7 +68,7 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     uint256 public bidPrice;                 // 当前收单价（wei）
     uint256 public maxBidPrice;              // 收单价上限
     uint16 public bidStepBps = 200;          // 每收一枚 +2%
-    uint16 public askMarkupBps = 12_000;     // 卖出价 = bid × 1.2
+    uint16 public askMarkupBps = 13_500;     // 卖出价 = bid × 1.35（必须盖过两头版税，见 minMarkupBps）
     uint16 public royaltyBps = 1000;         // 金库自付版税 10% → 分红池
     bool public bidPaused;
 
@@ -79,7 +79,15 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     uint256 public totalToVault;
     uint256 public totalToTeam;
     uint256 public totalSaleProceedsBurned;
+    uint256 public totalPrincipalRecycled;
     uint256 private _lastCollectedBnb;
+
+    /// 每枚 NFT 的持仓成本（含金库自付的版税）
+    mapping(uint256 => uint256) public costBasis;
+    /// 已卖出但尚未回流的本金
+    uint256 public pendingPrincipal;
+    /// 最近一次挂买单的单枚总成本，用作 Element 成交入库时的成本价
+    uint256 public pendingOrderCost;
 
     uint256[] private _inventory;
     mapping(uint256 => uint256) private _invIndexPlusOne;
@@ -110,6 +118,8 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     event OrderCancelled(uint256 nonce);
     event InventoryAdded(uint256 indexed tokenId);
     event InventoryRemoved(uint256 indexed tokenId);
+    event PrincipalRecycled(uint256 amount);
+    event ProfitBurned(uint256 bnbIn, uint256 nlstrBurned);
 
     modifier onlyKeeperOrOwner() {
         if (msg.sender != keeper && msg.sender != owner()) revert NotAuthorized();
@@ -153,8 +163,15 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
         teamBps = _teamBps;
     }
 
+    /// @notice 保本所需的最低加价：买入付 (1+r) 倍成本、卖出只到手 (1-r) 倍，
+    ///         所以必须 markup × (1−r) > (1+r)，即 markup > (1+r)/(1−r)。
+    function minMarkupBps() public view returns (uint16) {
+        return uint16((uint256(10_000 + royaltyBps) * 10_000) / (10_000 - royaltyBps)) + 1;
+    }
+
     function setMarketConfig(uint256 _maxBidPrice, uint16 _bidStepBps, uint16 _askMarkupBps) external onlyOwner {
-        if (_bidStepBps > 2000 || _askMarkupBps < 10_000 || _askMarkupBps > 30_000) revert BadParam();
+        if (_bidStepBps > 2000 || _askMarkupBps > 30_000) revert BadParam();
+        if (_askMarkupBps < minMarkupBps()) revert PriceTooLow();   // 防止设成必亏的加价
         maxBidPrice = _maxBidPrice;
         bidStepBps = _bidStepBps;
         askMarkupBps = _askMarkupBps;
@@ -195,15 +212,36 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
         _burnNlstrBalance();
     }
 
-    /// @notice 把「卖 NFT 得来的 BNB」买成 $NLSTR 并销毁（手续费不走这里，走 collectFees 的 80/10/10）
+    /// @dev NFT 离开金库时把它的成本价记为「待回本金」
+    function _onNftLeft(uint256 tokenId) internal {
+        uint256 c = costBasis[tokenId];
+        if (c > 0) { pendingPrincipal += c; delete costBasis[tokenId]; }
+    }
+
+    /// @notice 处理卖 NFT 得来的 BNB：**先把本金还给收购基金，只有盈利部分才买入并销毁 $NLSTR**。
     ///         余额里扣掉 nftFund 剩下的就是卖货所得。任何人可调用。
-    function processSaleProceeds() external nonReentrant {
+    function processSaleProceeds() external nonReentrant { _processSaleProceeds(); }
+
+    function _processSaleProceeds() internal {
         uint256 amt = address(this).balance - nftFund;
-        if (amt == 0 || !poolKeySet) return;
-        poolManager.unlock(abi.encode(Action.BUY_BURN, abi.encode(amt)));
-        uint256 burned = IERC20(nlstr).balanceOf(address(this));
-        _burnNlstrBalance();
-        totalSaleProceedsBurned += burned;
+        if (amt == 0) return;
+        // ① 本金回流，继续买 NFT
+        uint256 back = amt < pendingPrincipal ? amt : pendingPrincipal;
+        if (back > 0) {
+            nftFund += back;
+            pendingPrincipal -= back;
+            totalPrincipalRecycled += back;
+            amt -= back;
+            emit PrincipalRecycled(back);
+        }
+        // ② 只有盈利部分买入并销毁
+        if (amt > 0 && poolKeySet) {
+            poolManager.unlock(abi.encode(Action.BUY_BURN, abi.encode(amt)));
+            uint256 burned = IERC20(nlstr).balanceOf(address(this));
+            _burnNlstrBalance();
+            totalSaleProceedsBurned += burned;
+            emit ProfitBurned(amt, burned);
+        }
     }
 
     function unlockCallback(bytes calldata data) external returns (bytes memory) {
@@ -283,9 +321,14 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
         return bidPrice + bidPrice * royaltyBps / 10_000;
     }
 
-    /// @notice 金库当前卖出价
+    /// @notice 金库柜台标价（买家实付）
     function askPrice() public view returns (uint256) {
         return bidPrice * askMarkupBps / 10_000;
+    }
+
+    /// @notice 挂到 Element 时允许的最低「卖家净收」
+    function minSellNet() public view returns (uint256) {
+        return askPrice() * (10_000 - royaltyBps) / 10_000;
     }
 
     /// @notice 任何人按收单价把牛来 NFT 卖给金库，立刻拿到 BNB
@@ -296,6 +339,7 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
         if (nftFund < price + royalty) revert InsufficientFund();
 
         nftFund -= (price + royalty);
+        costBasis[tokenId] = price + royalty;
         _inventory.push(tokenId);
         _invIndexPlusOne[tokenId] = _inventory.length;
         totalBought += 1;
@@ -323,20 +367,15 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
         totalSold += 1;
 
         uint256 royalty = price * royaltyBps / 10_000;
-        uint256 forBurn = price - royalty;
         uint256 refund = msg.value - price;
+        _onNftLeft(tokenId);
 
         nft.transferFrom(address(this), msg.sender, tokenId);
         if (royalty > 0) { _pay(dividendVault, royalty); totalToVault += royalty; }
         if (refund > 0) _pay(msg.sender, refund);
 
-        if (forBurn > 0 && poolKeySet) {
-            poolManager.unlock(abi.encode(Action.BUY_BURN, abi.encode(forBurn)));
-            uint256 b = IERC20(nlstr).balanceOf(address(this));
-            _burnNlstrBalance();
-            totalSaleProceedsBurned += b;
-        }
-        emit SoldNft(msg.sender, tokenId, price, royalty, forBurn);
+        _processSaleProceeds();   // 先回本金，只烧利润
+        emit SoldNft(msg.sender, tokenId, price, royalty, price - royalty);
     }
 
     function _removeFromInventory(uint256 tokenId) internal {
@@ -396,6 +435,7 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
         }
         wbnb.approve(address(element), type(uint256).max);
 
+        pendingOrderCost = price + royalty;
         uint256 first = nextOrderNonce;
         for (uint256 i = 0; i < count; i++) {
             NFTBuyOrder memory o;
@@ -420,7 +460,9 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
     function approveListing(NFTSellOrder calldata o) external onlyKeeperOrOwner {
         if (o.maker != address(this) || o.nft != address(nft)) revert BadParam();
         if (_invIndexPlusOne[o.nftId] == 0) revert NotOwned();
-        if (o.erc20TokenAmount < askPrice()) revert PriceTooLow();
+        // Element 语义：erc20TokenAmount 是卖家净收，fees 由买家额外承担。
+        // 因此守卫的是「金库净收」，且必须覆盖成本。
+        if (o.erc20TokenAmount < minSellNet()) revert PriceTooLow();
         bytes32 h = element.getERC721SellOrderHash(o);
         approvedListings[h] = true;
         nft.setApprovalForAll(address(element), true);
@@ -450,10 +492,12 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
             if (owned && !tracked) {
                 _inventory.push(id);
                 _invIndexPlusOne[id] = _inventory.length;
+                if (costBasis[id] == 0) costBasis[id] = pendingOrderCost;
                 totalBought += 1;
                 emit InventoryAdded(id);
             } else if (!owned && tracked) {
                 _removeFromInventory(id);
+                _onNftLeft(id);
                 totalSold += 1;
                 emit InventoryRemoved(id);
             }

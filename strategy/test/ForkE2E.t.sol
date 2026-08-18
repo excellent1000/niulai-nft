@@ -149,7 +149,7 @@ contract ForkE2E is Test {
         address holder = NFT.ownerOf(1);
         uint256 tokenId = 1;
 
-        treasury.setMarketConfig(1 ether, 200, 12_000);
+        treasury.setMarketConfig(1 ether, 200, 13_500);
         treasury.setBidPrice(0.2 ether);
         treasury.fundBid{value: 5 ether}();
         vm.deal(address(this), 10 ether);
@@ -176,7 +176,7 @@ contract ForkE2E is Test {
         _buy(buyer, 5 ether); // 先让池子里有 BNB，才能买回 NLSTR
 
         address holder = NFT.ownerOf(2);
-        treasury.setMarketConfig(1 ether, 200, 12_000);
+        treasury.setMarketConfig(1 ether, 200, 13_500);
         treasury.setBidPrice(0.2 ether);
         vm.deal(address(this), 10 ether);
         treasury.fundBid{value: 5 ether}();
@@ -301,7 +301,7 @@ contract ForkE2E is Test {
         assertGt(treasury.nftFund(), 0.7 ether);
 
         // ② 金库在 Element 挂 3 张合集通吃买单
-        treasury.setMarketConfig(1 ether, 200, 12_000);
+        treasury.setMarketConfig(1 ether, 200, 13_500);
         treasury.setBidPrice(0.2 ether);
         treasury.placeBuyOrders(3, 0.2 ether, block.timestamp + 7 days);
         console2.log(unicode"② 已挂 3 张买单 @0.2 BNB，nonce 起始", treasury.nextOrderNonce() - 3);
@@ -368,10 +368,17 @@ contract ForkE2E is Test {
         treasury.syncInventory(ids);
         assertEq(treasury.isForSale(sellId), false, unicode"库存应已清理");
         uint256 supply0 = nlstr.totalSupply();
+        uint256 fundBefore = treasury.nftFund();
+        uint256 cost = treasury.pendingPrincipal();
         treasury.processSaleProceeds();
         console2.log(unicode"⑤ 同步后库存", treasury.inventorySize());
-        console2.log(unicode"   卖货所得买入并销毁 NLSTR(万枚)", (supply0 - nlstr.totalSupply()) / 1e22);
-        assertGt(supply0 - nlstr.totalSupply(), 0, unicode"卖货所得应销毁 NLSTR");
+        console2.log(unicode"   这枚的成本(wei)", cost);
+        console2.log(unicode"   本金回流收购基金(wei)", treasury.nftFund() - fundBefore);
+        console2.log(unicode"   盈利买入并销毁 NLSTR(万枚)", (supply0 - nlstr.totalSupply()) / 1e22);
+        console2.log(unicode"   累计本金回流(wei)", treasury.totalPrincipalRecycled());
+        assertEq(treasury.nftFund() - fundBefore, cost, unicode"本金应全额回流");
+        assertGt(supply0 - nlstr.totalSupply(), 0, unicode"盈利部分应销毁 NLSTR");
+        assertEq(treasury.pendingPrincipal(), 0, unicode"待回本金应清零");
         console2.log(unicode"   累计进分红池(wei)", treasury.totalToVault());
     }
 
@@ -386,5 +393,68 @@ contract ForkE2E is Test {
         o.nft = address(NFT); o.nftId = 0;
         o.nftProperties = new Property[](1);
         o.nftProperties[0] = Property({propertyValidator: address(0), propertyData: ""});
+    }
+
+    /// 亏本卖出时：全部回本金，不销毁
+    function test_13_sellAtLossRecyclesAll() public {
+        vm.warp(block.timestamp + DECAY + 1);
+        vm.deal(buyer, 100 ether);
+        _buy(buyer, 5 ether);
+        treasury.collectFees(TICK_LOWER, TICK_UPPER);
+
+        treasury.setMarketConfig(1 ether, 200, 13_500);
+        treasury.setBidPrice(0.2 ether);
+        address h = NFT.ownerOf(100);
+        vm.startPrank(h);
+        NFT.approve(address(treasury), 100);
+        treasury.sellToTreasury(100);
+        vm.stopPrank();
+        assertEq(treasury.costBasis(100), 0.22 ether, unicode"成本 = 价格 + 自付版税");
+
+        // 人为把卖价压到成本以下
+        treasury.setBidPrice(0.1 ether);         // ask 变成 0.12
+        uint256 supply0 = nlstr.totalSupply();
+        uint256 fund0 = treasury.nftFund();
+        vm.deal(arb, 10 ether);
+        vm.prank(arb);
+        treasury.buyFromTreasury{value: treasury.askPrice()}(100);
+
+        console2.log(unicode"亏本卖出：成本 0.22 BNB，售价(wei)", uint256(0.12 ether));
+        console2.log(unicode"   回流收购基金(wei)", treasury.nftFund() - fund0);
+        console2.log(unicode"   销毁 NLSTR", supply0 - nlstr.totalSupply());
+        console2.log(unicode"   仍欠本金(wei)", treasury.pendingPrincipal());
+        assertEq(supply0 - nlstr.totalSupply(), 0, unicode"亏本时不应销毁");
+        assertGt(treasury.pendingPrincipal(), 0, unicode"未收回的本金应挂账");
+    }
+
+    /// 完整一轮的资金守恒：买入成本 vs 卖出后各口袋
+    function test_14_cycleAccounting() public {
+        vm.warp(block.timestamp + DECAY + 1);
+        vm.deal(buyer, 100 ether);
+        _buy(buyer, 10 ether);
+        treasury.collectFees(TICK_LOWER, TICK_UPPER);
+
+        treasury.setMarketConfig(1 ether, 200, 13_500);
+        treasury.setBidPrice(0.2 ether);
+        uint256 fundStart = treasury.nftFund();
+
+        address h = NFT.ownerOf(101);
+        vm.startPrank(h); NFT.approve(address(treasury), 101); treasury.sellToTreasury(101); vm.stopPrank();
+        uint256 afterBuy = treasury.nftFund();
+        console2.log(unicode"收一枚花掉(wei)", fundStart - afterBuy);
+
+        uint256 ask = treasury.askPrice();
+        uint256 supply0 = nlstr.totalSupply();
+        vm.deal(arb, 10 ether);
+        vm.prank(arb);
+        treasury.buyFromTreasury{value: ask}(101);
+
+        console2.log(unicode"卖出价(wei)", ask);
+        console2.log(unicode"卖后收购基金(wei)", treasury.nftFund());
+        console2.logInt(int256(treasury.nftFund()) - int256(fundStart));
+        console2.log(unicode"销毁 NLSTR(万枚)", (supply0 - nlstr.totalSupply()) / 1e22);
+        console2.log(unicode"累计进分红池(wei)", treasury.totalToVault());
+        // 本金全回来了，基金应回到起点附近（差额 = 付出去的版税）
+        assertGe(treasury.nftFund(), fundStart * 99 / 100, unicode"本金应基本回流");
     }
 }
