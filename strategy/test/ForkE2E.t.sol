@@ -271,4 +271,16 @@ contract ForkE2E is Test {
         assertGt(big, 0, unicode"衰减期后应放开");
         console2.log(unicode"开盘期 0.4 BNB 买到(百万枚)", got / 1e24);
     }
+
+    function test_11_decayImpactOnBuyer() public {
+        uint256[6] memory ts = [uint256(0), 30, 60, 120, 240, 301];
+        for (uint256 i = 0; i < ts.length; i++) {
+            uint256 snap = vm.snapshotState();
+            vm.warp(block.timestamp + ts[i]);
+            vm.deal(buyer, 10 ether);
+            uint256 got = _buy(buyer, 0.4 ether);
+            console2.log(unicode"  开盘后(秒)/税率(pips)/0.4BNB买到(万枚)", ts[i], hook.currentFeePips(), got / 1e22);
+            vm.revertToState(snap);
+        }
+    }
 }
