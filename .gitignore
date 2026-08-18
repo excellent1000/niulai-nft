@@ -23,3 +23,5 @@ strategy/cache/
 strategy/broadcast/**/dry-run/
 strategy/node_modules
 strategy/airdrop/sent-*.json
+web/candles.json
+web/orders.json

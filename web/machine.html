@@ -1,0 +1,720 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>牛来永动机</title>
+<link rel="icon" href="favicon.ico" sizes="any" />
+<link rel="icon" type="image/png" sizes="64x64" href="favicon-64.png" />
+<meta property="og:title" content="牛来永动机" />
+<meta property="og:image" content="https://niulai.sbs/assets/og.jpg" />
+<meta name="theme-color" content="#0f0d0c" />
+<style>
+  :root {
+    --bg:#0f0d0c; --panel:#171211; --panel2:#221a17; --line:#3a2e28; --ink:#f3ede4; --dim:#b8ada0;
+    --yellow:#ffe066; --gold:#e3c93a; --red:#c8412b; --green:#7fd98f; --sky:#7fb2d9;
+    --checker: repeating-conic-gradient(#ff00dc 0 25%, #141414 0 50%) 0 0/18px 18px;
+    --font: -apple-system, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+  }
+  * { box-sizing:border-box }
+  body { margin:0; background:var(--bg); color:var(--ink); font:16px/1.65 var(--font); overflow-x:hidden }
+  a { color:var(--yellow) }
+  .bar { position:fixed; left:0; right:0; height:22px; background:#050404; z-index:50; pointer-events:none } .bar.top{top:0} .bar.bottom{bottom:0}
+  .grain { position:fixed; inset:0; z-index:49; pointer-events:none; opacity:.16; mix-blend-mode:overlay;
+    background-image: repeating-radial-gradient(circle at 17% 33%, #fff 0 1px, transparent 1px 3px), repeating-radial-gradient(circle at 63% 71%, #000 0 1px, transparent 1px 4px); background-size:7px 7px, 11px 11px }
+  .vignette { position:fixed; inset:0; z-index:48; pointer-events:none; background: radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,.55) 100%) }
+  .wrap { max-width:1180px; margin:0 auto; padding:44px 20px 120px; position:relative; z-index:2 }
+
+  .shouchuo { font-weight:900; color:var(--yellow); -webkit-text-stroke:1px #000;
+    text-shadow: 3px 3px 0 #000, -1px -1px 0 #000, 1px -1px 0 #000, -1px 1px 0 #000 }
+  header { display:flex; align-items:center; justify-content:space-between; gap:14px; flex-wrap:wrap; margin-bottom:22px }
+  header h1 { margin:0; font-size:32px; line-height:1.1; transform:rotate(-1.2deg) }
+  header h1 small { display:block; font-size:12px; color:var(--dim); -webkit-text-stroke:0; text-shadow:none; letter-spacing:3px; margin-top:6px }
+  .toolbar { display:flex; align-items:center; gap:10px; flex-wrap:wrap }
+  .tok { color:var(--dim); text-decoration:none; font:700 13px var(--mono); border:2px solid #111; background:var(--panel2); padding:8px 10px; border-radius:6px; box-shadow:3px 3px 0 #111; white-space:nowrap }
+  .tok span { color:var(--yellow) } .tok:hover { color:var(--ink) }
+  .btn { background:var(--gold); color:#1a1200; border:3px solid #111; border-radius:6px; padding:11px 16px; font:900 15px var(--font);
+    box-shadow:5px 5px 0 #111; cursor:pointer; transform:skew(-2deg); transition:transform .08s, box-shadow .08s; text-decoration:none; display:inline-block }
+  .btn:hover { transform:skew(-2deg) translate(2px,2px); box-shadow:3px 3px 0 #111; background-image:var(--checker); background-blend-mode:screen }
+  .btn:active { transform:skew(-2deg) translate(5px,5px); box-shadow:0 0 0 #111 }
+  .btn:disabled { opacity:.45; cursor:not-allowed; transform:skew(-2deg); box-shadow:5px 5px 0 #111; background-image:none }
+  .btn.sm { padding:7px 12px; font-size:13px; box-shadow:3px 3px 0 #111 }
+  .btn.ghost { background:var(--panel2); color:var(--ink) }
+
+  /* 头条：税率倒计时 / 机器状态 */
+  .hero { border:3px solid #000; box-shadow:8px 8px 0 #000; background:linear-gradient(180deg,#1b1512,#0d0a09); padding:22px; margin-bottom:26px; position:relative; overflow:hidden }
+  .hero::after { content:""; position:absolute; inset:0; background:var(--checker); opacity:.05; pointer-events:none }
+  .hero h2 { margin:0 0 4px; font-size:clamp(22px,3.2vw,34px) }
+  .heroGrid { display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:12px; margin-top:16px }
+  .heroGrid div { background:#0b0908; border:2px solid #000; padding:12px 14px }
+  .heroGrid small { display:block; color:var(--dim); font-size:12px; letter-spacing:.5px }
+  .heroGrid strong { display:block; font-size:26px; color:var(--gold); font-weight:900; font-variant-numeric:tabular-nums; margin-top:2px }
+  .heroGrid strong.g { color:var(--green) } .heroGrid strong.r { color:var(--red) }
+
+  .grid { display:grid; grid-template-columns:1fr 1fr; gap:26px }
+  @media (max-width:900px){ .grid { grid-template-columns:1fr } }
+  .card { background:var(--panel); border:3px solid #000; box-shadow:8px 8px 0 #000; padding:20px; position:relative; transform:rotate(-.3deg) }
+  .card:nth-child(2n){ transform:rotate(.35deg) }
+  .card h3 { margin:0 0 12px; font-size:19px }
+  .row { display:flex; justify-content:space-between; gap:10px; padding:7px 0; border-bottom:1px dashed var(--line); font-size:14px }
+  .row:last-of-type { border-bottom:0 }
+  .row span { color:var(--dim) } .row b { color:var(--ink); font-variant-numeric:tabular-nums; font-family:var(--mono) }
+  .bar2 { height:18px; background:#0b0908; border:2px solid #000; margin:10px 0 6px; position:relative; overflow:hidden }
+  .bar2 i { display:block; height:100%; background:var(--checker); transition:width .8s }
+  .bar2 em { position:absolute; inset:0; display:grid; place-items:center; font:900 11px var(--mono); color:#fff; text-shadow:1px 1px 0 #000; font-style:normal }
+
+  .ladder { display:flex; align-items:stretch; gap:0; margin:14px 0 6px; border:2px solid #000; background:#0b0908 }
+  .ladder div { flex:1; padding:10px 8px; text-align:center; border-right:2px solid #000 }
+  .ladder div:last-child { border-right:0 }
+  .ladder small { display:block; color:var(--dim); font-size:11px } .ladder b { font:900 17px var(--mono); color:var(--gold) }
+  .ladder div.mid { background:#1a120c } .ladder div.mid b { color:var(--yellow) }
+
+  .inv { display:grid; grid-template-columns:repeat(auto-fill,minmax(108px,1fr)); gap:10px; margin-top:12px }
+  .inv figure { margin:0; border:2px solid #000; background:#0b0908; overflow:hidden }
+  .inv img { width:100%; display:block; aspect-ratio:1; object-fit:cover }
+  .inv figcaption { padding:6px; font:700 12px var(--mono); display:flex; justify-content:space-between; align-items:center; gap:4px }
+  .inv .p { color:var(--gold) }
+  .empty { color:var(--dim); font-size:14px; padding:16px 0; text-align:center }
+
+  table { width:100%; border-collapse:collapse; font-size:13px; margin-top:8px }
+  th,td { text-align:left; padding:7px 8px; border-bottom:1px solid var(--line); font-family:var(--mono) }
+  th { color:var(--dim); font-weight:700; font-size:11px; letter-spacing:.08em }
+  td.n { text-align:right }
+  .tag { display:inline-block; padding:2px 7px; border:2px solid #111; background:#2a2118; font:800 11px var(--font); color:var(--yellow) }
+  .tag.buy { color:var(--green) } .tag.sell { color:var(--red) }
+
+  /* 行情 + 交易 */
+  .trade { display:grid; grid-template-columns:1.55fr 1fr; gap:26px; margin-bottom:26px }
+  @media (max-width:900px){ .trade { grid-template-columns:1fr } }
+  .chartHead { display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; margin-bottom:8px }
+  .price { font:900 30px var(--mono); color:var(--gold); font-variant-numeric:tabular-nums }
+  .chg { font:800 14px var(--mono); padding:2px 8px; border:2px solid #111 }
+  .chg.up { color:#7fd98f; background:#0f1a10 } .chg.down { color:#ff8a7a; background:#1a0f0d }
+  .chartMeta { margin-left:auto; display:flex; gap:8px; align-items:center }
+  .tf button { border:2px solid #111; background:#0b0908; color:var(--dim); font:800 12px var(--font); padding:5px 9px; cursor:pointer }
+  .tf button.on { background:var(--gold); color:#1a1200 }
+  #chart { height:320px; border:2px solid #000; background:#0b0908 }
+  .stats { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; margin-top:10px }
+  .stats div { background:#0b0908; border:2px solid #000; padding:8px 10px }
+  .stats small { display:block; color:var(--dim); font-size:11px } .stats b { font:900 15px var(--mono); color:var(--ink) }
+
+  .swap .tabs { display:flex; border:3px solid #000; margin-bottom:14px }
+  .swap .tabs button { flex:1; border:0; padding:11px; font:900 15px var(--font); background:#2a2118; color:var(--dim); cursor:pointer }
+  .swap .tabs button.on { background:var(--gold); color:#1a1200 }
+  .swap .tabs button.on.sell { background:var(--red); color:#fff }
+  .amt { display:flex; align-items:center; gap:8px; border:3px solid #000; background:#0b0908; padding:10px 12px }
+  .amt input { flex:1; min-width:0; border:0; background:transparent; color:var(--ink); font:900 22px var(--mono); outline:none }
+  .amt span { color:var(--dim); font:800 13px var(--font) }
+  .quick { display:flex; gap:6px; margin:8px 0 12px }
+  .quick button { flex:1; border:2px solid #111; background:#0b0908; color:var(--dim); font:800 12px var(--font); padding:6px 0; cursor:pointer }
+  .quick button:hover { color:var(--yellow); border-color:var(--yellow) }
+  .slip { display:flex; align-items:center; gap:6px; margin:10px 0 0; flex-wrap:wrap }
+  .slip > small { color:var(--dim); font-size:12px; margin-right:2px }
+  .slip button { border:2px solid #111; background:#0b0908; color:var(--dim); font:800 12px var(--font); padding:5px 9px; cursor:pointer }
+  .slip button.on { background:var(--gold); color:#1a1200; border-color:#111 }
+  .slip .cust { display:flex; align-items:center; border:2px solid #111; background:#0b0908; padding:0 6px }
+  .slip .cust input { width:44px; border:0; background:transparent; color:var(--ink); font:800 12px var(--mono); outline:none; text-align:right; padding:5px 0 }
+  .slip .cust span { color:var(--dim); font-size:12px }
+  .slip.warn .cust { border-color:var(--red) }
+  .quote { background:#0b0908; border:2px solid #000; padding:10px 12px; margin:10px 0 12px; font-size:13px }
+  .quote .row { padding:4px 0; border:0 }
+
+  #log { background:#0b0908; border:2px solid #000; padding:10px 12px; font:12px/1.6 var(--mono); color:var(--dim); max-height:150px; overflow:auto; margin-top:20px }
+  .note { color:var(--dim); font-size:13px; margin-top:10px }
+  .flow { font:12px/1.9 var(--mono); color:var(--dim); background:#0b0908; border:2px solid #000; padding:12px 14px; white-space:pre; overflow-x:auto; margin-top:12px }
+  .flow b { color:var(--yellow) }
+</style>
+</head>
+<body>
+<div class="bar top"></div><div class="bar bottom"></div><div class="grain"></div><div class="vignette"></div>
+
+<div class="wrap">
+  <header>
+    <h1 class="shouchuo">牛来永动机<small>NIULAI STRATEGY · $NLSTR</small></h1>
+    <div class="toolbar">
+      <a class="tok" id="tokChip" href="#" title="点击复制">$NLSTR <span id="tokAddr">未部署</span></a>
+      <a class="tok" href="./">← 牛来 NFT</a>
+      <a class="tok" href="https://x.com/Niulai_NFT" target="_blank" rel="noopener">X</a>
+      <button class="btn" id="connect">连接钱包</button>
+    </div>
+  </header>
+
+  <section class="hero">
+    <h2 class="shouchuo" id="heroTitle">机器运转中</h2>
+    <p style="margin:0;color:var(--dim);font-size:14px" id="heroSub">
+      买 $NLSTR → 10% 手续费 → 80% 收购牛来 NFT、10% 进 NFT 分红池、10% 团队。金库收到的 NFT 加价转卖，本金回流继续收，利润买入并销毁 $NLSTR。
+    </p>
+    <div class="heroGrid">
+      <div><small>当前交易税</small><strong id="feeNow">–</strong></div>
+      <div><small>降到 10% 还需</small><strong id="feeCountdown">–</strong></div>
+      <div><small>$NLSTR 已销毁</small><strong class="r" id="burned">–</strong></div>
+      <div><small>累计进 NFT 分红池</small><strong class="g" id="toVault">–</strong></div>
+    </div>
+  </section>
+
+  <div class="trade">
+    <div class="card" style="transform:none">
+      <div class="chartHead">
+        <span class="price" id="fdv">–</span><span style="color:var(--dim);font-size:13px;margin-left:-8px">BNB 市值</span>
+        <span class="chg" id="chg">–</span>
+        <span style="color:var(--dim);font-size:13px">1 BNB = <b id="px" style="color:var(--ink);font-family:var(--mono)">–</b></span>
+        <div class="chartMeta tf" id="tf">
+          <button data-tf="60" class="on">1分</button><button data-tf="300">5分</button><button data-tf="3600">1时</button>
+        </div>
+      </div>
+      <div id="chart"></div>
+      <div class="stats">
+        <div><small>24h 成交量</small><b id="vol24">–</b></div>
+        <div><small>累计成交</small><b id="trades">–</b></div>
+        <div><small>较开盘</small><b id="vsLaunch">–</b></div>
+      </div>
+    </div>
+
+    <div class="card swap" style="transform:none">
+      <div class="tabs">
+        <button id="tabBuy" class="on">买入</button><button id="tabSell" class="sell">卖出</button>
+      </div>
+      <div class="amt"><input id="amt" type="number" inputmode="decimal" placeholder="0.0" /><span id="amtCur">BNB</span></div>
+      <div class="quick" id="quick"></div>
+      <div class="quote">
+        <div class="row"><span>预计获得</span><b id="qOut">–</b></div>
+        <div class="row"><span>交易税</span><b id="qFee">–</b></div>
+        <div class="row"><span>其中收购 NFT</span><b id="qNft">–</b></div>
+        <div class="row"><span>其中进 NFT 分红池</span><b id="qDiv">–</b></div>
+        <div class="row"><span>最少到手</span><b id="qMin">–</b></div>
+        <div class="row"><span>价格冲击</span><b id="qImpact">–</b></div>
+      </div>
+      <div class="slip" id="slip">
+        <small>滑点上限</small>
+        <button data-s="0.5">0.5%</button><button data-s="1">1%</button>
+        <button data-s="2" class="on">2%</button><button data-s="5">5%</button>
+        <span class="cust"><input id="slipCust" type="number" step="0.1" min="0.1" max="50" placeholder="自定义" /><span>%</span></span>
+      </div>
+      <p class="note" id="slipWarn" style="display:none;color:var(--red)"></p>
+      <button class="btn" id="swapBtn" style="width:100%;font-size:17px;padding:14px">连接钱包</button>
+      <p class="note" id="swapNote">交易走 Uniswap v4，10% 手续费全额进金库。</p>
+    </div>
+  </div>
+
+  <div class="grid">
+    <div class="card">
+      <h3 class="shouchuo">金库收单价</h3>
+      <p class="note" style="margin-top:0">金库在链上常驻挂着买单，价格<b style="color:var(--yellow)">只涨不跌</b>——每收一枚自动上调。任何人都可以把牛来 NFT 卖给它。</p>
+      <div class="ladder">
+        <div><small>收单价 BID</small><b id="bid">–</b></div>
+        <div class="mid"><small>加价</small><b id="markup">–</b></div>
+        <div><small>柜台价 ASK</small><b id="ask">–</b></div>
+      </div>
+      <div class="row"><span>距离下次收单</span><b id="progTxt">–</b></div>
+      <div class="bar2"><i id="prog" style="width:0%"></i><em id="progPct"></em></div>
+      <div class="row"><span>收购基金</span><b id="fund">–</b></div>
+      <div class="row"><span>已收购 / 已卖出</span><b id="boughtSold">–</b></div>
+      <div class="row"><span>每收一枚上调</span><b id="step">–</b></div>
+      <div class="row"><span>金库合约</span><b><a id="treasuryLink" href="#" target="_blank" rel="noopener">–</a></b></div>
+    </div>
+
+    <div class="card">
+      <h3 class="shouchuo">$NLSTR</h3>
+      <div class="row"><span>总量</span><b id="supply">–</b></div>
+      <div class="row"><span>已销毁</span><b id="burned2">–</b></div>
+      <div class="row"><span>销毁占比</span><b id="burnPct">–</b></div>
+      <div class="row"><span>交易税</span><b id="feeNow2">–</b></div>
+      <div class="row"><span>本金已回流</span><b id="recycled">–</b></div>
+      <div class="row"><span>待回本金</span><b id="pending">–</b></div>
+      <div class="flow" id="flow">买 1 BNB 的 $NLSTR
+  ├─ <b>0.080</b> BNB → 收购牛来 NFT
+  ├─ <b>0.010</b> BNB → NFT 持有者分红
+  └─ <b>0.010</b> BNB → 团队</div>
+      <p class="note">代币本身<b style="color:var(--yellow)">零转账税</b>，税只在池子里 swap 时收；合约里没有任何免税白名单。80% 流动性单边入池并<b style="color:var(--yellow)">永久锁死</b>（金库合约里不存在撤出流动性的函数）。</p>
+    </div>
+  </div>
+
+  <div class="card" style="margin-top:26px;transform:rotate(-.2deg)">
+    <h3 class="shouchuo">金库柜台 <span style="font-size:13px;color:var(--dim);font-weight:400">— 金库持有的牛来 NFT，谁都能买走</span></h3>
+    <div class="inv" id="inv"></div>
+    <div class="empty" id="invEmpty">金库暂无库存</div>
+  </div>
+
+  <div class="card" style="margin-top:26px;transform:rotate(.2deg)">
+    <h3 class="shouchuo">链上挂单 <span style="font-size:13px;color:var(--dim);font-weight:400">— 全部在 Element 合约上成交，计入成交量与地板价</span></h3>
+    <table id="book"><thead><tr><th>方向</th><th>tokenId</th><th class="n">价格 BNB</th><th>有效期</th><th></th></tr></thead><tbody id="bookBody"></tbody></table>
+    <div class="empty" id="bookEmpty">暂无挂单</div>
+    <p class="note">买单是金库出价收货（任何人可以卖给它）；卖单是金库出货。我们不占用 Element 的挂单列表，但成交走的是 Element 合约，成交记录与真实交易完全一致。</p>
+  </div>
+
+  <div id="log">等待连接节点…</div>
+</div>
+
+<script src="assets/ethers.umd.min.js"></script>
+<script src="assets/lwc.js"></script>
+<script type="module">
+const { ethers } = window;
+const q = new URLSearchParams(location.search);
+const CONFIG = {
+  chainId: 56, chainHex: '0x38',
+  rpcs: [q.get('rpc'), 'https://bsc-dataseed.bnbchain.org', 'https://bsc-dataseed1.defibit.io',
+         'https://bsc-dataseed1.ninicoin.io', 'https://bsc-rpc.publicnode.com', 'https://1rpc.io/bnb',
+         'https://bsc.drpc.org', 'https://bsc-dataseed.binance.org', 'https://binance.llamarpc.com'].filter(Boolean),
+  treasury: q.get('treasury') || '',
+  nlstr:    q.get('nlstr')    || '',
+  hook:     q.get('hook')     || '',
+  nft: '0x5fd0d8FeCF408f61080cEa470249026d3e02fB3D',
+  element: '0xb3e3DfCb2d9f3DdE16d78B9e6EB3538Eb32B5ae1',
+  imgBase: 'https://niulai.sbs/img/',
+  ordersUrl: q.get('orders') || 'orders.json',
+};
+// ethers v6 严格校验地址大小写：URL 参数里粘进来的小写地址会让每个调用都抛
+// "bad address checksum"，且失败得很安静。统一规范化一次。
+for (const k of ['treasury', 'nlstr', 'hook', 'nft', 'element']) {
+  if (!CONFIG[k]) continue;
+  try { CONFIG[k] = ethers.getAddress(CONFIG[k]); }
+  catch { console.warn('地址无效，已忽略:', k, CONFIG[k]); CONFIG[k] = ''; }
+}
+const DEPLOYED = !!CONFIG.treasury;
+
+const T_ABI = ['function bidPrice() view returns (uint256)','function askPrice() view returns (uint256)',
+ 'function nftFund() view returns (uint256)','function bidCost() view returns (uint256)',
+ 'function askMarkupBps() view returns (uint16)','function bidStepBps() view returns (uint16)',
+ 'function totalBought() view returns (uint256)','function totalSold() view returns (uint256)',
+ 'function totalNlstrBurned() view returns (uint256)','function totalToVault() view returns (uint256)',
+ 'function totalPrincipalRecycled() view returns (uint256)','function pendingPrincipal() view returns (uint256)',
+ 'function inventory() view returns (uint256[])','function buyFromTreasury(uint256 tokenId) payable',
+ 'function sellToTreasury(uint256 tokenId)'];
+const H_ABI = ['function currentFeePips() view returns (uint24)','function launchTime() view returns (uint256)','function decaySeconds() view returns (uint256)','function finalFeePips() view returns (uint24)','function LAUNCH_FEE_PIPS() view returns (uint24)'];
+const E_ABI = ['function totalSupply() view returns (uint256)'];
+const EX_ABI = ['function buyERC721Ex((address,address,uint256,uint256,address,uint256,(address,uint256,bytes)[],address,uint256) o,(uint8,uint8,bytes32,bytes32) sig,address taker,bytes extra) payable'];
+
+const $ = id => document.getElementById(id);
+const log = m => { const el = $('log'); el.textContent = new Date().toLocaleTimeString() + '  ' + m + '\n' + el.textContent; };
+const fmt = (v, d = 4) => Number(ethers.formatEther(v)).toLocaleString(undefined, { maximumFractionDigits: d });
+const fmtK = v => { const n = Number(ethers.formatEther(v)); return n >= 1e8 ? (n/1e8).toFixed(2)+' 亿' : n >= 1e4 ? (n/1e4).toFixed(1)+' 万' : n.toLocaleString(undefined,{maximumFractionDigits:0}); };
+const short = a => a.slice(0, 6) + '…' + a.slice(-4);
+
+const NET = ethers.Network.from(CONFIG.chainId);
+let ro = null, roUrl = null, signer = null, account = null, failCount = 0;
+let state = { fee: 0, launch: 0, decay: 300, finalFee: 100000, launchFee: 950000, ask: 0n };
+// 链上时间与本地时间的差值：倒计时和费率都必须按 block.timestamp 算，
+// 否则本地时钟走完了链上还没走完（anvil 不出块时最明显），会显示错误税率
+let chainOffset = 0;
+const chainNow = () => Math.floor(Date.now() / 1000) + chainOffset;
+
+async function probeRpc(url) {
+  const c = new AbortController(); const t = setTimeout(() => c.abort(), 5000);
+  try {
+    const r = await fetch(url, { method: 'POST', signal: c.signal, headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }) });
+    const j = await r.json();
+    if (parseInt(j.result, 16) !== CONFIG.chainId) throw new Error('wrong chain');
+    return url;
+  } finally { clearTimeout(t); }
+}
+async function pickRpc() {
+  try { roUrl = await Promise.any(CONFIG.rpcs.map(probeRpc)); } catch { roUrl = CONFIG.rpcs[0]; }
+  ro = new ethers.JsonRpcProvider(roUrl, NET, { staticNetwork: NET, batchMaxCount: 1 });
+  return ro;
+}
+const rp = () => (signer ? signer.provider : ro);
+const T = () => new ethers.Contract(CONFIG.treasury, T_ABI, rp());
+const H = () => new ethers.Contract(CONFIG.hook, H_ABI, rp());
+const E = () => new ethers.Contract(CONFIG.nlstr, E_ABI, rp());
+
+function renderFee() {
+  if (!state.launch) return;
+  const now = chainNow();
+  const elapsed = now - state.launch;
+  const left = state.decay - elapsed;
+  // 与合约完全同一套算式（NLSTRHook.currentFeePips）
+  let pips;
+  if (elapsed <= 0) pips = state.launchFee;
+  else if (elapsed >= state.decay) pips = state.finalFee;
+  else pips = state.launchFee - ((state.launchFee - state.finalFee) * elapsed) / state.decay;
+
+  const pct = pips / 10000;
+  $('feeNow').textContent = (pct % 1 === 0 ? pct.toFixed(0) : pct.toFixed(1)) + '%';
+  $('feeNow').className = left > 0 ? 'r' : '';
+  $('feeNow2').textContent = $('feeNow').textContent;
+  if (left > 0) {
+    $('feeCountdown').textContent = Math.floor(left / 60) + ':' + String(Math.floor(left % 60)).padStart(2, '0');
+    $('heroTitle').textContent = '开盘保护中 · 交易税递减';
+  } else {
+    $('feeCountdown').textContent = '已降到底';
+    $('heroTitle').textContent = '机器运转中';
+  }
+}
+setInterval(renderFee, 1000);
+
+async function refresh() {
+  if (!DEPLOYED) { log('合约尚未部署。可用 ?treasury=0x..&nlstr=0x..&hook=0x.. 预览'); return; }
+  if (!ro && !signer) await pickRpc();
+  try {
+    const t = T(), h = H(), e = E();
+    const [bid, ask, fund, cost, markup, step, bought, sold, burned, toVault, recycled, pending, inv] =
+      await Promise.all([t.bidPrice(), t.askPrice(), t.nftFund(), t.bidCost(), t.askMarkupBps(), t.bidStepBps(),
+        t.totalBought(), t.totalSold(), t.totalNlstrBurned(), t.totalToVault(), t.totalPrincipalRecycled(),
+        t.pendingPrincipal(), t.inventory()]);
+    const [supply, pips, launch, decay, finalFee, launchFee, blk] = await Promise.all([
+      e.totalSupply(), h.currentFeePips(), h.launchTime(), h.decaySeconds(),
+      h.finalFeePips(), h.LAUNCH_FEE_PIPS(), rp().getBlock('latest')]);
+    chainOffset = Number(blk.timestamp) - Math.floor(Date.now() / 1000);
+    failCount = 0;
+    state = { fee: Number(pips), launch: Number(launch), decay: Number(decay),
+              finalFee: Number(finalFee), launchFee: Number(launchFee), ask };
+    // 自检：本地算出来的必须和链上一致，不一致说明时间基准错了
+    const local = state.launch && (chainNow() - state.launch) >= state.decay ? state.finalFee : null;
+    if (local !== null && Math.abs(local - state.fee) > 1) log(`费率对不上：链上 ${state.fee}，本地算 ${local}`);
+
+    $('bid').textContent = fmt(bid, 4);
+    $('ask').textContent = fmt(ask, 4);
+    $('markup').textContent = (Number(markup) / 10000).toFixed(2) + '×';
+    $('step').textContent = '+' + (Number(step) / 100).toFixed(1) + '%';
+    $('fund').textContent = fmt(fund, 4) + ' BNB';
+    $('boughtSold').textContent = `${bought} / ${sold}`;
+    const pct = cost > 0n ? Math.min(100, Number((fund * 10000n) / cost) / 100) : 0;
+    $('prog').style.width = Math.max(2, pct) + '%';
+    $('progPct').textContent = pct >= 100 ? '可以收单' : pct.toFixed(0) + '%';
+    $('progTxt').textContent = pct >= 100 ? '资金已就绪' : `还差 ${fmt(cost - fund, 4)} BNB`;
+    $('burned').textContent = fmtK(burned);
+    $('burned2').textContent = fmtK(burned) + ' 枚';
+    $('supply').textContent = fmtK(supply) + ' 枚';
+    $('burnPct').textContent = supply > 0n ? (Number((burned * 10000n) / (supply + burned)) / 100).toFixed(3) + '%' : '–';
+    $('toVault').textContent = fmt(toVault, 4) + ' BNB';
+    $('recycled').textContent = fmt(recycled, 4) + ' BNB';
+    $('pending').textContent = fmt(pending, 4) + ' BNB';
+    $('treasuryLink').textContent = short(CONFIG.treasury);
+    $('treasuryLink').href = 'https://bscscan.com/address/' + CONFIG.treasury;
+    if (CONFIG.nlstr) { $('tokAddr').textContent = short(CONFIG.nlstr); $('tokChip').href = 'https://bscscan.com/token/' + CONFIG.nlstr; }
+    renderFee();
+    renderInv(inv.map(Number), ask);
+  } catch (err) {
+    failCount++;
+    log('读取失败：' + (err.shortMessage || err.message) + (roUrl ? ' @ ' + roUrl : '') + ` （第 ${failCount} 次重试）`);
+    ro = null; if (!signer) setTimeout(refresh, 2500);
+  }
+}
+
+function renderInv(ids, ask) {
+  const box = $('inv');
+  $('invEmpty').style.display = ids.length ? 'none' : 'block';
+  box.innerHTML = ids.map(id => `
+    <figure>
+      <img loading="lazy" src="${CONFIG.imgBase}${String(id).padStart(4, '0')}.png" alt="牛来 #${id}" />
+      <figcaption><span>#${id}</span><span class="p">${fmt(ask, 3)}</span></figcaption>
+      <div style="padding:0 6px 6px"><button class="btn sm" style="width:100%" data-buy="${id}">买走</button></div>
+    </figure>`).join('');
+  box.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => buyFromTreasury(b.dataset.buy));
+}
+
+async function loadBook() {
+  try {
+    const r = await fetch(CONFIG.ordersUrl + '?t=' + Date.now());
+    if (!r.ok) throw new Error('no orders file');
+    const b = await r.json();
+    const rows = [
+      ...(b.buy || []).map(o => ({ side: 'buy', id: '任意一枚', price: o.price, exp: o.expiry, o })),
+      ...(b.sell || []).map(o => ({ side: 'sell', id: '#' + o.tokenId, price: o.price, exp: o.order[2], o })),
+    ];
+    $('bookEmpty').style.display = rows.length ? 'none' : 'block';
+    $('bookBody').innerHTML = rows.map((r2, i) => `
+      <tr>
+        <td><span class="tag ${r2.side}">${r2.side === 'buy' ? '金库收货' : '金库出货'}</span></td>
+        <td>${r2.id}</td>
+        <td class="n">${Number(ethers.formatEther(r2.price)).toFixed(4)}</td>
+        <td>${new Date(Number(r2.exp) * 1000).toLocaleString()}</td>
+        <td>${r2.side === 'sell' ? `<button class="btn sm" data-el="${i}">在 Element 买</button>` : '<span style="color:var(--dim)">用下方合约调用卖出</span>'}</td>
+      </tr>`).join('');
+    $('bookBody').querySelectorAll('[data-el]').forEach(btn => btn.onclick = () => fillSell(rows[btn.dataset.el].o));
+  } catch { $('bookEmpty').style.display = 'block'; $('bookEmpty').textContent = '暂无挂单（keeper 尚未发布）'; }
+}
+
+async function connect() {
+  if (!window.ethereum) return log('没检测到钱包');
+  const bp = new ethers.BrowserProvider(window.ethereum);
+  await bp.send('eth_requestAccounts', []);
+  const net = await bp.getNetwork();
+  if (Number(net.chainId) !== CONFIG.chainId) {
+    try { await bp.send('wallet_switchEthereumChain', [{ chainId: CONFIG.chainHex }]); } catch { return log('请切换到 BNB Chain'); }
+  }
+  signer = await new ethers.BrowserProvider(window.ethereum).getSigner();
+  account = await signer.getAddress();
+  $('connect').textContent = short(account);
+  $('swapBtn').textContent = side === 'buy' ? '买入 $NLSTR' : '卖出 $NLSTR';
+  log('已连接 ' + short(account));
+  refresh();
+}
+
+async function buyFromTreasury(tokenId) {
+  if (!signer) return connect();
+  try {
+    const t = new ethers.Contract(CONFIG.treasury, T_ABI, signer);
+    const price = await t.askPrice();
+    const tx = await t.buyFromTreasury(tokenId, { value: price });
+    log(`买 #${tokenId}，交易 ${tx.hash}`); await tx.wait(); log('成交'); refresh();
+  } catch (e) { log('失败：' + (e.shortMessage || e.message)); }
+}
+
+async function fillSell(o) {
+  if (!signer) return connect();
+  try {
+    const ex = new ethers.Contract(CONFIG.element, EX_ABI, signer);
+    const tx = await ex.buyERC721Ex(o.order, [3, 27, ethers.ZeroHash, ethers.ZeroHash], await signer.getAddress(), '0x', { value: o.price });
+    log(`在 Element 买 #${o.tokenId}，交易 ${tx.hash}`); await tx.wait(); log('成交'); refresh(); loadBook();
+  } catch (e) { log('失败：' + (e.shortMessage || e.message)); }
+}
+
+$('connect').onclick = connect;
+$('tokChip').onclick = e => { if (CONFIG.nlstr) { e.preventDefault(); navigator.clipboard?.writeText(CONFIG.nlstr); log('已复制合约地址'); } };
+
+
+// ============================== 行情图 ==============================
+const UR_ADDR = '0x1906c1d672b88cD1B9aC7593301cA990F94Eae07';
+const PERMIT2 = '0x000000000022D473030F116dDEE9F6B43aC78BA3';
+const UR_ABI = ['function execute(bytes commands, bytes[] inputs, uint256 deadline) payable'];
+const P2_ABI = ['function approve(address token,address spender,uint160 amount,uint48 expiration)',
+                'function allowance(address,address,address) view returns (uint160,uint48,uint48)'];
+const ERC_ABI = ['function approve(address,uint256) returns (bool)','function allowance(address,address) view returns (uint256)','function balanceOf(address) view returns (uint256)'];
+const QUOTER = '0x9F75dD27D6664c475B90e105573E550ff69437B0';
+const Q_ABI = ['function quoteExactInputSingle(((address,address,uint24,int24,address),bool,uint128,bytes) params) returns (uint256 amountOut, uint256 gasEstimate)'];
+const A = ethers.AbiCoder.defaultAbiCoder();
+let slipBps = Number(localStorage.getItem('nlstr.slip') || 200);   // 默认 2%
+let quoteSeq = 0, lastQuote = null;
+const POOL_FEE = 0x800000, TICK_SPACING = 60;
+
+let chart = null, candleSeries = null, volSeries = null, tf = 60, candlesRaw = [];
+const SUPPLY_N = 1e9;   // 图表按 FDV（价格 × 总量）作图，纯价格是 1e-8 量级没法读
+let lastPrice = 0;
+
+function initChart() {
+  if (chart || !window.LightweightCharts) return;
+  const el = $('chart');
+  chart = LightweightCharts.createChart(el, {
+    layout: { background: { type: 'solid', color: '#0b0908' }, textColor: '#b8ada0', fontFamily: 'ui-monospace, Menlo, monospace' },
+    grid: { vertLines: { color: 'rgba(255,255,255,.05)' }, horzLines: { color: 'rgba(255,255,255,.05)' } },
+    rightPriceScale: { borderColor: '#3a2e28', scaleMargins: { top: .1, bottom: .28 } },
+    timeScale: { borderColor: '#3a2e28', timeVisible: true, secondsVisible: false },
+    crosshair: { mode: 0 }, autoSize: true,
+  });
+  candleSeries = chart.addSeries(LightweightCharts.CandlestickSeries, {
+    upColor: '#7fd98f', downColor: '#c8412b', wickUpColor: '#7fd98f', wickDownColor: '#c8412b', borderVisible: false,
+    priceFormat: { type: 'price', precision: 2, minMove: 0.01 },
+  });
+  volSeries = chart.addSeries(LightweightCharts.HistogramSeries, { priceFormat: { type: 'volume' }, priceScaleId: '' });
+  chart.priceScale('').applyOptions({ scaleMargins: { top: .78, bottom: 0 } });
+}
+
+// 把 1 分钟原始 K 线重新聚合成所选周期
+function bucketize(rows, sec) {
+  const m = new Map();
+  for (const c of rows) {
+    const t = Math.floor(c.time / sec) * sec;
+    const x = m.get(t);
+    if (!x) m.set(t, { time: t, open: c.open, high: c.high, low: c.low, close: c.close, volume: c.volume });
+    else { x.high = Math.max(x.high, c.high); x.low = Math.min(x.low, c.low); x.close = c.close; x.volume += c.volume; }
+  }
+  return [...m.values()].sort((a, b) => a.time - b.time);
+}
+
+async function loadCandles() {
+  try {
+    const r = await fetch('candles.json?t=' + Date.now());
+    if (!r.ok) throw 0;
+    const d = await r.json();
+    candlesRaw = d.candles || [];
+    renderChart();
+    if (d.price) {
+      lastPrice = d.price;
+      $('fdv').textContent = d.fdv.toLocaleString(undefined, { maximumFractionDigits: 1 });
+      const per = 1 / d.price;
+      $('px').textContent = per >= 1e8 ? (per / 1e8).toFixed(2) + ' 亿枚' : (per / 1e4).toFixed(1) + ' 万枚';
+      $('vsLaunch').textContent = (d.fdv / 6).toFixed(1) + '×';
+    }
+    $('trades').textContent = (d.trades || 0) + ' 笔';
+    const cut = (candlesRaw.at(-1)?.time || 0) - 86400;
+    $('vol24').textContent = candlesRaw.filter(c => c.time >= cut).reduce((s, c) => s + c.volume, 0).toFixed(2) + ' BNB';
+    const first = candlesRaw.find(c => c.time >= cut) || candlesRaw[0];
+    if (first && d.price) {
+      const pc = ((d.price - first.open) / first.open) * 100;
+      const e = $('chg'); e.textContent = (pc >= 0 ? '+' : '') + pc.toFixed(1) + '%';
+      e.className = 'chg ' + (pc >= 0 ? 'up' : 'down');
+    }
+  } catch { $('fdv').textContent = '暂无成交'; }
+}
+
+function renderChart() {
+  initChart();
+  if (!candleSeries) return;
+  const rows = bucketize(candlesRaw, tf);
+  candleSeries.setData(rows.map(c => ({ time: c.time, open: c.open * SUPPLY_N, high: c.high * SUPPLY_N, low: c.low * SUPPLY_N, close: c.close * SUPPLY_N })));
+  volSeries.setData(rows.map(c => ({ time: c.time, value: c.volume, color: c.close >= c.open ? 'rgba(127,217,143,.35)' : 'rgba(200,65,43,.35)' })));
+  chart.timeScale().fitContent();
+}
+$('tf').querySelectorAll('button').forEach(b => b.onclick = () => {
+  $('tf').querySelectorAll('button').forEach(x => x.classList.remove('on'));
+  b.classList.add('on'); tf = Number(b.dataset.tf); renderChart();
+});
+
+// ============================== 买卖 ==============================
+let side = 'buy';
+function setSide(s2) {
+  side = s2;
+  $('tabBuy').classList.toggle('on', s2 === 'buy');
+  $('tabSell').classList.toggle('on', s2 === 'sell');
+  $('amtCur').textContent = s2 === 'buy' ? 'BNB' : 'NLSTR';
+  $('quick').innerHTML = (s2 === 'buy' ? ['0.05', '0.1', '0.5', '1'] : ['25%', '50%', '75%', '100%'])
+    .map(v => `<button data-q="${v}">${v}</button>`).join('');
+  $('quick').querySelectorAll('button').forEach(b => b.onclick = () => fillQuick(b.dataset.q));
+  $('amt').value = ''; quote();
+}
+async function fillQuick(v) {
+  if (side === 'buy') { $('amt').value = v; }
+  else {
+    if (!account) return connect();
+    const bal = await new ethers.Contract(CONFIG.nlstr, ERC_ABI, rp()).balanceOf(account);
+    $('amt').value = ethers.formatEther((bal * BigInt(parseInt(v)) ) / 100n);
+  }
+  quote();
+}
+// 报价：优先用链上 Quoter（含价格冲击与 hook 费率），失败时退回按最新价估算
+async function quote() {
+  const v = Number($('amt').value || 0);
+  const seq = ++quoteSeq;
+  if (!v) { ['qOut','qFee','qNft','qDiv','qMin','qImpact'].forEach(i => $(i).textContent = '–'); lastQuote = null; return; }
+  const feePct = state.launch ? feeNowPips() / 1e6 : 0.1;
+  const zeroForOne = side === 'buy';
+  const amtIn = ethers.parseEther(String(v));
+
+  // 手续费拆解（买单以 BNB 计，卖单以卖出所得 BNB 计）
+  const grossBnb = zeroForOne ? v : v * lastPrice;
+  const fee = grossBnb * feePct;
+  $('qFee').textContent = fee.toFixed(6) + ' BNB（' + (feePct * 100).toFixed(1) + '%）';
+  $('qNft').textContent = (fee * 0.8).toFixed(6) + ' BNB';
+  $('qDiv').textContent = (fee * 0.1).toFixed(6) + ' BNB';
+
+  let out = null;
+  try {
+    const q = new ethers.Contract(QUOTER, Q_ABI, rp());
+    const r = await q.quoteExactInputSingle.staticCall([poolKeyTuple(), zeroForOne, amtIn, '0x']);
+    out = r[0];
+  } catch { out = null; }
+  if (seq !== quoteSeq) return;   // 已有更新的输入
+
+  if (out === null) {
+    // 退化估算
+    const est = zeroForOne ? (v - fee) / (lastPrice || Infinity) : grossBnb - fee;
+    $('qOut').textContent = fmtOut(est, zeroForOne);
+    $('qMin').textContent = fmtOut(est * (1 - slipBps / 10000), zeroForOne);
+    $('qImpact').textContent = '报价不可用（估算）';
+    lastQuote = null;
+    return;
+  }
+  const outN = Number(ethers.formatEther(out));
+  const minOut = (out * BigInt(10000 - slipBps)) / 10000n;
+  lastQuote = { amtIn, out, minOut, zeroForOne };
+  $('qOut').textContent = fmtOut(outN, zeroForOne);
+  $('qMin').textContent = fmtOut(Number(ethers.formatEther(minOut)), zeroForOne);
+  // 价格冲击 = 实际成交均价相对当前价的偏离（已扣掉手续费部分）
+  if (lastPrice) {
+    const idealOut = zeroForOne ? (v - fee) / lastPrice : grossBnb - fee;
+    const imp = idealOut > 0 ? (1 - outN / idealOut) * 100 : 0;
+    const e = $('qImpact');
+    e.textContent = (imp > 0 ? '-' : '+') + Math.abs(imp).toFixed(2) + '%';
+    e.style.color = Math.abs(imp) > 5 ? 'var(--red)' : 'var(--ink)';
+  }
+}
+function fmtOut(n, isBuy) {
+  if (!isFinite(n) || n <= 0) return '–';
+  return isBuy ? n.toLocaleString(undefined, { maximumFractionDigits: 0 }) + ' NLSTR' : n.toFixed(6) + ' BNB';
+}
+
+// 滑点控件
+function setSlip(bps, fromInput) {
+  slipBps = Math.max(10, Math.min(5000, Math.round(bps)));
+  localStorage.setItem('nlstr.slip', String(slipBps));
+  const box = $('slip');
+  box.querySelectorAll('button').forEach(b => b.classList.toggle('on', Math.round(Number(b.dataset.s) * 100) === slipBps));
+  const preset = [...box.querySelectorAll('button')].some(b => b.classList.contains('on'));
+  if (!fromInput) $('slipCust').value = preset ? '' : (slipBps / 100).toString();
+  box.classList.toggle('warn', slipBps > 1000);
+  const w = $('slipWarn');
+  if (slipBps < 50) { w.style.display = 'block'; w.textContent = '滑点太低，价格稍有波动交易就会失败'; }
+  else if (slipBps > 1000) { w.style.display = 'block'; w.textContent = `滑点 ${(slipBps / 100).toFixed(1)}% 偏高，可能被夹`; }
+  else w.style.display = 'none';
+  quote();
+}
+$('slip').querySelectorAll('button').forEach(b => b.onclick = () => setSlip(Number(b.dataset.s) * 100, false));
+$('slipCust').oninput = e => { const v = Number(e.target.value); if (v > 0) setSlip(v * 100, true); };
+
+function feeNowPips() {
+  const el = chainNow() - state.launch;
+  if (el <= 0) return state.launchFee;
+  if (el >= state.decay) return state.finalFee;
+  return state.launchFee - ((state.launchFee - state.finalFee) * el) / state.decay;
+}
+$('amt').oninput = quote;
+setSlip(slipBps, false);
+$('tabBuy').onclick = () => setSide('buy');
+$('tabSell').onclick = () => setSide('sell');
+
+function poolKeyTuple() { return [ethers.ZeroAddress, CONFIG.nlstr, POOL_FEE, TICK_SPACING, CONFIG.hook]; }
+
+async function doSwap() {
+  if (!signer) return connect();
+  const v = $('amt').value;
+  if (!Number(v)) return log('请输入数量');
+  const amtIn = ethers.parseEther(v);
+  const btn = $('swapBtn'); btn.disabled = true;
+  try {
+    const zeroForOne = side === 'buy';
+    if (!zeroForOne) {
+      // 卖出要先把 NLSTR 授权给 Permit2，再由 Permit2 授权给 UniversalRouter
+      const tok = new ethers.Contract(CONFIG.nlstr, ERC_ABI, signer);
+      if ((await tok.allowance(account, PERMIT2)) < amtIn) {
+        btn.textContent = '授权中…'; log('第 1/3 步：授权 NLSTR 给 Permit2');
+        await (await tok.approve(PERMIT2, ethers.MaxUint256)).wait();
+      }
+      const p2 = new ethers.Contract(PERMIT2, P2_ABI, signer);
+      const [allowed, exp] = await p2.allowance(account, CONFIG.nlstr, UR_ADDR);
+      if (allowed < amtIn || Number(exp) < chainNow()) {
+        btn.textContent = '授权中…'; log('第 2/3 步：Permit2 授权给路由器');
+        await (await p2.approve(CONFIG.nlstr, UR_ADDR, (1n << 160n) - 1n, chainNow() + 30 * 86400)).wait();
+      }
+    }
+    btn.textContent = '提交中…';
+    const actions = ethers.concat(['0x06', '0x0c', '0x0f']);   // SWAP_EXACT_IN_SINGLE, SETTLE_ALL, TAKE_ALL
+    const inCur = zeroForOne ? ethers.ZeroAddress : CONFIG.nlstr;
+    const outCur = zeroForOne ? CONFIG.nlstr : ethers.ZeroAddress;
+    // 真正的滑点保护：minOut 来自链上 Quoter × (1 - 滑点)
+    let minOut = 0n;
+    if (lastQuote && lastQuote.amtIn === amtIn && lastQuote.zeroForOne === zeroForOne) minOut = lastQuote.minOut;
+    else {
+      const q = new ethers.Contract(QUOTER, Q_ABI, rp());
+      const r = await q.quoteExactInputSingle.staticCall([poolKeyTuple(), zeroForOne, amtIn, '0x']);
+      minOut = (r[0] * BigInt(10000 - slipBps)) / 10000n;
+    }
+    log(`滑点上限 ${(slipBps / 100).toFixed(1)}%，最少到手 ${ethers.formatEther(minOut)}`);
+    const params = [
+      A.encode(['((address,address,uint24,int24,address),bool,uint128,uint128,uint256,bytes)'],
+        [[poolKeyTuple(), zeroForOne, amtIn, minOut, 0n, '0x']]),
+      A.encode(['address', 'uint256'], [inCur, amtIn]),
+      A.encode(['address', 'uint256'], [outCur, 0n]),
+    ];
+    const inputs = [A.encode(['bytes', 'bytes[]'], [actions, params])];
+    const ur = new ethers.Contract(UR_ADDR, UR_ABI, signer);
+    // deadline 必须基于**链上时间**：用本地时钟会因为时钟偏差直接 TransactionDeadlinePassed
+    const tx = await ur.execute('0x10', inputs, chainNow() + 600, zeroForOne ? { value: amtIn } : {});
+    log((zeroForOne ? '买入' : '卖出') + ` 提交 ${tx.hash}`);
+    await tx.wait();
+    log('成交 ✔'); $('amt').value = ''; quote(); refresh(); loadCandles();
+  } catch (e) {
+    const m = e.shortMessage || e.message || '';
+    log('失败：' + (m.includes('5bf6f916') ? 'deadline 过期（本地时钟与链上不同步）' : m));
+  } finally { btn.disabled = false; btn.textContent = account ? (side === 'buy' ? '买入 $NLSTR' : '卖出 $NLSTR') : '连接钱包'; }
+}
+$('swapBtn').onclick = doSwap;
+setSide('buy');
+
+pickRpc().then(refresh).then(loadBook).then(loadCandles);
+setInterval(() => { refresh(); loadBook(); loadCandles(); }, 30000);
+</script>
+</body>
+</html>

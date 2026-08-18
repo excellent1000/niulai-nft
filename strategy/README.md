@@ -131,6 +131,38 @@ keeper syncInventory 出库 1 → processSaleProceeds：
    并提供 `cancelBuyOrders()` 撤单后一次性释放
 3. `JSON.stringify` 遇 BigInt 抛异常被外层 try 吞掉，订单数据根本没发布出去
 
+## 网站面板 `web/machine.html`
+
+单文件静态页，与主站同一套视觉。所有依赖自托管（`assets/ethers.umd.min.js`、
+`assets/lwc.js` = TradingView lightweight-charts v5.2），不走 CDN——国内网络能开。
+
+- **行情**：自建 OHLC 索引（`scripts/candles.mjs` 读 v4 `Swap` 事件 → `candles.json`），
+  蜡烛图 + 成交量，1分/5分/1时切换。**纵轴画的是 FDV 不是原始价**——价格是 1e-8 量级，
+  画出来是一串 `0.0000000759`，没人看得懂。
+- **买卖**：走 Uniswap v4 Universal Router。买入直接付 BNB；卖出自动处理
+  ERC20→Permit2→UniversalRouter 两段授权。
+- **滑点可自定义**：0.5/1/2/5% 预设 + 任意输入，记在 localStorage。
+  `amountOutMinimum` 由链上 **v4 Quoter** 报价 ×(1−滑点) 算出，并同时显示价格冲击。
+- **金库面板**：收单价阶梯、下次收单进度条、库存柜台（一键买走）、链上挂单表。
+
+### 页面上踩到的坑
+
+1. **税率显示错**（用户发现）：倒计时用本地 `Date.now()`、税率取自链上 `block.timestamp`，
+   两者不同步时会出现"已降到底"却显示 93%。改成全部按链上时间算，并在刷新时与
+   `currentFeePips()` 交叉校验。
+2. **`TransactionDeadlinePassed()`**：同一类问题——swap 的 deadline 也必须用链上时间，
+   否则用户本地时钟稍慢就会以一个看不懂的错误失败。
+3. **滑点是假的**：面板写着"滑点上限 2%"，实际 `amountOutMinimum` 传的是 `0`，
+   等于毫无保护。现在真的用 Quoter 算 minOut。
+4. **`bad address checksum`**：ethers v6 严格校验地址大小写，URL 参数里粘进来的
+   小写地址会让每个调用静默失败。统一 `getAddress()` 规范化。
+
+本地预览：
+```bash
+cd web && python3 -m http.server 8891
+open "http://127.0.0.1:8891/machine.html?rpc=<节点>&treasury=0x..&nlstr=0x..&hook=0x.."
+```
+
 ## 主网 fork 演练
 
 ```bash
@@ -177,5 +209,5 @@ BSC_RPC_URL=<你的BSC节点> forge test -vv
 - [x] 空投：快照 / 加权 / 批量发放脚本
 - [x] keeper 脚本 —— **anvil 主网分叉上端到端跑通一整圈**（见下）
 
-- [ ] 网站面板：收单价 / 进度条 / 金库存货 / 销毁计数 / 柜台
+
 - [ ] 第三方审计（hook 与金库经手全部资金流，目前只有自测）

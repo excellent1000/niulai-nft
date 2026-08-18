@@ -2,6 +2,7 @@
 //   node scripts/keeper.mjs           # 常驻
 //   ONCE=1 node scripts/keeper.mjs    # 跑一轮
 // env: KEEPER_PK RPC_URL TREASURY NLSTR ELEMENT NFT  [OPEN_ORDERS=3 POLL_SEC=60 ORDER_TTL_H=24]
+import fs from 'node:fs';
 import { ethers } from 'ethers';
 
 const RPC = process.env.RPC_URL || 'https://bsc-dataseed.bnbchain.org';
@@ -16,6 +17,7 @@ const TTL = Number(process.env.ORDER_TTL_H || 24) * 3600;
 const TICK_LOWER = Number(process.env.TICK_LOWER || -887220);
 const TICK_UPPER = Number(process.env.TICK_UPPER || 189300);
 const ONCE = process.env.ONCE === '1';
+const ORDERS_OUT = process.env.ORDERS_OUT || '';   // 写成 JSON 供网站读取
 
 const log = (...a) => console.log(new Date().toISOString(), ...a);
 const J = (o) => JSON.stringify(o, (_, v) => (typeof v === 'bigint' ? v.toString() : v));
@@ -51,6 +53,13 @@ const nft = new ethers.Contract(NFT, ['function ownerOf(uint256) view returns (a
 
 // 记录我们挂过的卖单，避免重复挂
 const listed = new Set();
+// 对外公示的订单簿（网站从这里读，买卖双方才能发现）
+const book = { updatedAt: 0, treasury: TREASURY, element: ELEMENT, nft: NFT, buy: [], sell: [] };
+function publish() {
+  if (!ORDERS_OUT) return;
+  book.updatedAt = Math.floor(Date.now() / 1000);
+  fs.writeFileSync(ORDERS_OUT, J(book));
+}
 
 async function tick() {
   signer.reset();   // 与链上 nonce 对齐
@@ -74,7 +83,7 @@ async function tick() {
   if (toSync.length) {
     await (await T.syncInventory(toSync)).wait();
     log(`syncInventory：入库 ${toAdd.length}，出库 ${toRemove.length}`);
-    toRemove.forEach(id => listed.delete(id));
+    toRemove.forEach(id => { listed.delete(id); book.sell = book.sell.filter(x => x.tokenId !== id); });
   }
 
   // ③ 卖货所得：先回本金，只烧利润
@@ -96,11 +105,13 @@ async function tick() {
       const roy = (bid * BigInt(await T.royaltyBps())) / 10000n;
       const vault0 = await T.dividendVault();
       await (await T.placeBuyOrders(n, bid, expiry)).wait();
+      book.buy = [];   // 旧买单已被新一批取代
       log(`挂 ${n} 张买单 @${ethers.formatEther(bid)} BNB（基金 ${ethers.formatEther(fund)}）`);
       // 买单必须公布出去，卖家才能调 Element 的 sellERC721 吃单
       for (let k = 0; k < n; k++) {
         const order = [TREASURY, ethers.ZeroAddress, expiry, firstNonce + k, WBNB, bid,
                        [[vault0, roy, '0x']], NFT, 0, [[ethers.ZeroAddress, '0x']]];
+        book.buy.push({ nonce: firstNonce + k, price: bid.toString(), expiry, order });
         console.log('  BUY_ORDER', J({ nonce: firstNonce + k, price: bid, order }));
       }
     } else if (OPEN_ORDERS > 0) log(`收购基金不足（${ethers.formatEther(fund)} < 单枚成本 ${ethers.formatEther(cost)}），暂不挂买单`);
@@ -123,9 +134,12 @@ async function tick() {
       listed.add(id);
       log(`挂卖单 #${id} 净收 ${ethers.formatEther(net)} BNB  hash ${h.slice(0, 12)}…`);
       // 订单数据需要发布出去（网站/事件）才能被买家发现
+      book.sell.push({ tokenId: id, hash: h, price: (net + (ask * BigInt(royBps)) / 10000n).toString(), net: net.toString(), order });
       console.log('  SELL_ORDER', J({ tokenId: id, hash: h, order }));
     } catch (e) { log(`挂卖单 #${id} 失败: ${(e.shortMessage || e.message).slice(0, 80)}`); }
   }
+
+  publish();
 
   // ⑥ 把**超出挂单占用**的 WBNB 换回 BNB（合约里有 committedWbnb 保护，不会挖空未成交的买单）
   try { await (await T.unwrapIdle()).wait(); } catch {}
