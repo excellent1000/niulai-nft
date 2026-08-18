@@ -80,6 +80,7 @@ async function harvestExtraTokens() {
 }
 
 async function tick() {
+  signer.reset();   // 每轮开始与链上 nonce 对齐（钱包可能在别处发过交易）
   // 上一轮没发完先补发（比如上次进程中途挂了）
   if (await vault.roundActive()) { log('上一轮未发完，继续分发…'); await distributeAll(); }
   await harvestExtraTokens();
@@ -111,7 +112,12 @@ async function tick() {
 async function main() {
   log(`keeper ${wallet.address} → vault ${VAULT}`);
   do {
-    try { await tick(); } catch (e) { log('错误：', e.shortMessage || e.message); }
+    try { await tick(); } catch (e) {
+      const msg = e.shortMessage || e.message || '';
+      log('错误：', msg);
+      // 同一钱包在别处发过交易会让缓存的 nonce 过期 → 重置后立刻重试一次
+      if (/nonce|replacement|already known|underpriced/i.test(msg)) { signer.reset(); log('nonce 已重置，立即重试'); try { await tick(); } catch (e2) { log('重试仍失败：', e2.shortMessage || e2.message); } }
+    }
     if (!ONCE) await new Promise(r => setTimeout(r, POLL_SEC * 1000));
   } while (!ONCE);
 }
