@@ -167,6 +167,39 @@ open "http://127.0.0.1:8891/machine.html?rpc=<节点>&treasury=0x..&nlstr=0x..&h
 > 演练会把 `broadcast/Deploy.s.sol/56/run-latest.json` 写成一份"看起来像主网"的部署记录，
 > 真上线时极易被当成已部署。以线上合约地址为准，不要读这个文件。
 
+## 部署：拆成两步，**部署 ≠ 开盘**
+
+`launchTime` 是在 `PM.initialize()` 那一刻写死的，95%→10% 的衰减和 0.5 BNB 单笔上限都只在
+开盘后 5 分钟内有效。合约验证、往网站填地址、发推文这些事没法在 5 分钟里做完，所以拆成两个脚本：
+
+| | 做什么 | 做完的状态 |
+|---|---|---|
+| `Deploy` | 部署 NLSTR / Treasury / Hook（CREATE2 挖地址）、互相指认、设收单价、分配 80/10/10 | **买不到**：池子不存在，Quoter 报 `PoolNotInitialized` |
+| `Launch` | 建池 + 单边注入 80% | **开盘**，衰减开始跑 |
+
+```bash
+# 第一步（随时可做）
+DEPLOYER_PK=0x.. DEV_WALLET=0x.. AIRDROP_WALLET=0x.. TEAM_WALLET=0x.. INIT_BID=120000000000000000 \
+  forge script script/Deploy.s.sol:Deploy --rpc-url bsc --broadcast --verify
+
+# 中间：验证合约、把三个地址填进 web/machine.html 的 CONFIG、部署网站、写好推文
+
+# 第二步（想开盘的那一秒）
+DEPLOYER_PK=0x.. NLSTR_ADDR=0x.. HOOK_ADDR=0x.. TREASURY_ADDR=0x.. \
+  forge script script/Deploy.s.sol:Launch --rpc-url bsc --broadcast
+```
+
+`Launch` 开跑前会自检：hook/nlstr 已互相指认、`launchTime==0`、金库里正好有 80% 的币，
+任一不满足直接 revert，不会开出一个半残的盘。
+
+### `INIT_BID` 必须自己定
+
+`bidPrice` 初始是 0，**为 0 时金库会一直攒钱但一枚 NFT 都不收**（`sellToTreasury` 直接
+revert `BidDisabled`），整个飞轮是死的。不传 `INIT_BID` 部署脚本会打印大写警告。
+
+定价原则：**开在地板价下面**。收单价只涨不跌（每收一枚 +2%），开高了会被人瞬间倒货掏空基金；
+开低了它就是个慢慢往上爬的托底买单。加价 1.35× 之后要落在近期成交带里才卖得掉。
+
 ## 主网 fork 演练
 
 ```bash

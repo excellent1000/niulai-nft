@@ -18,8 +18,10 @@ import {NLSTRHook} from "../src/NLSTRHook.sol";
 import {StrategyTreasury} from "../src/StrategyTreasury.sol";
 import {IElementEx, IWBNB} from "../src/ElementTypes.sol";
 
-/// 一键部署牛来永动机。BSC 主网地址已写死。
+/// 第一步：部署合约并分配代币，**不开盘**（不建池、不注流动性，此时买不到）。
 ///   forge script script/Deploy.s.sol:Deploy --rpc-url bsc --broadcast -vvvv
+/// 开盘是第二步，见 script/Launch.s.sol —— 拆开是因为 launchTime 在 initialize
+/// 那一刻就开始跑，95%→10% 只有 5 分钟。合约验证、填网站地址、写推文都得在开盘前做完。
 contract Deploy is Script {
     // ---- BSC 主网
     IPoolManager constant PM = IPoolManager(0x28e2Ea090877bF75740558f6BFB36A5ffeE9e9dF);
@@ -58,10 +60,12 @@ contract Deploy is Script {
 
         vm.startBroadcast(pk);
         _deploy(owner);
-        _initPool();
-        _seedLiquidity();
-        _allocate();
         treasury.setMarketConfig(vm.envOr("MAX_BID", uint256(2 ether)), 200, 13_500);
+        // 收单价初始值：不设的话 bidPrice=0，金库会一直攒钱但一枚都不收。
+        // 该定在当时的地板价附近，所以留成参数而不是写死。
+        uint256 initBid = vm.envOr("INIT_BID", uint256(0));
+        if (initBid > 0) treasury.setBidPrice(initBid);
+        _allocate();
         vm.stopBroadcast();
         _report();
     }
@@ -93,23 +97,9 @@ contract Deploy is Script {
         });
     }
 
-    function _initPool() internal {
-        treasury.setPoolKey(poolKey());
-        PM.initialize(poolKey(), TickMath.getSqrtPriceAtTick(TICK_UPPER));
-    }
-
-    /// 单边注入 80%：一分 BNB 不用出，且金库没有撤出流动性的函数 → 永久锁死
-    function _seedLiquidity() internal {
-        uint256 lpAmount = SUPPLY * LP_BPS / 10_000;
-        nlstr.transfer(address(treasury), lpAmount);
-        uint128 liq = LiquidityAmounts.getLiquidityForAmount1(
-            TickMath.getSqrtPriceAtTick(TICK_LOWER), TickMath.getSqrtPriceAtTick(TICK_UPPER), lpAmount
-        );
-        treasury.addLiquidity(TICK_LOWER, TICK_UPPER, liq);
-    }
-
-    /// 10% 空投池 + 10% dev
+    /// 10% 空投池 + 10% dev + 80% 预存进金库等开盘入池
     function _allocate() internal {
+        nlstr.transfer(address(treasury), SUPPLY * LP_BPS / 10_000);
         nlstr.transfer(airdropHolder, SUPPLY * AIRDROP_BPS / 10_000);
         if (dev != airdropHolder) nlstr.transfer(dev, SUPPLY * DEV_BPS / 10_000);
     }
@@ -119,9 +109,68 @@ contract Deploy is Script {
         console2.log("Hook       ", address(hook));
         console2.log("Treasury   ", address(treasury));
         console2.logBytes32(hookSalt);
-        console2.log("LP locked  ", (SUPPLY * LP_BPS / 10_000) / 1e18);
         console2.log("airdrop 10%", airdropHolder);
         console2.log("dev 10%    ", dev);
         console2.log("minMarkup  ", treasury.minMarkupBps());
+        if (treasury.bidPrice() == 0) {
+            console2.log("!! bidPrice = 0 -> treasury will NEVER buy an NFT.");
+            console2.log("!! set it before launch: cast send <treasury> 'setBidPrice(uint256)' <wei>");
+        } else {
+            console2.log("bid        ", treasury.bidPrice());
+            console2.log("ask        ", treasury.askPrice());
+        }
+        console2.log("--- still CLOSED: no pool, no liquidity, nobody can buy ---");
+    }
+}
+
+/// 第二步：开盘。建池 + 单边注入 80%，**这一秒起 5 分钟的 95%→10% 开始跑**。
+///   NLSTR_ADDR=0x.. TREASURY_ADDR=0x.. HOOK_ADDR=0x.. \
+///   forge script script/Deploy.s.sol:Launch --rpc-url bsc --broadcast -vvvv
+contract Launch is Script {
+    IPoolManager constant PM = IPoolManager(0x28e2Ea090877bF75740558f6BFB36A5ffeE9e9dF);
+    int24 constant TICK_SPACING = 60;
+    int24 constant TICK_UPPER = 189_300;
+    int24 constant TICK_LOWER = -887_220;
+
+    NLSTR public nlstr;
+    NLSTRHook public hook;
+    StrategyTreasury public treasury;
+
+    function poolKey() public view returns (PoolKey memory) {
+        return PoolKey({
+            currency0: Currency.wrap(address(0)),
+            currency1: Currency.wrap(address(nlstr)),
+            fee: LPFeeLibrary.DYNAMIC_FEE_FLAG,
+            tickSpacing: TICK_SPACING,
+            hooks: IHooks(address(hook))
+        });
+    }
+
+    function run() external {
+        uint256 pk = vm.envUint("DEPLOYER_PK");
+        nlstr = NLSTR(vm.envAddress("NLSTR_ADDR"));
+        hook = NLSTRHook(vm.envAddress("HOOK_ADDR"));
+        treasury = StrategyTreasury(payable(vm.envAddress("TREASURY_ADDR")));
+
+        // 开盘前自检：三者必须已经互相指认，且 80% 已经躺在金库里
+        require(treasury.hook() == address(hook), "hook not wired");
+        require(treasury.nlstr() == address(nlstr), "nlstr not wired");
+        require(hook.launchTime() == 0, "already launched");
+        uint256 lpAmount = nlstr.balanceOf(address(treasury));
+        require(lpAmount == nlstr.totalSupply() * 8000 / 10_000, "treasury LP balance wrong");
+
+        vm.startBroadcast(pk);
+        treasury.setPoolKey(poolKey());
+        PM.initialize(poolKey(), TickMath.getSqrtPriceAtTick(TICK_UPPER));
+        uint128 liq = LiquidityAmounts.getLiquidityForAmount1(
+            TickMath.getSqrtPriceAtTick(TICK_LOWER), TickMath.getSqrtPriceAtTick(TICK_UPPER), lpAmount
+        );
+        treasury.addLiquidity(TICK_LOWER, TICK_UPPER, liq);
+        vm.stopBroadcast();
+
+        console2.log("LAUNCHED at", hook.launchTime());
+        console2.log("fee now   ", hook.currentFeePips());
+        console2.log("LP locked ", lpAmount / 1e18);
+        if (treasury.bidPrice() == 0) console2.log("!! WARNING bidPrice=0: treasury collects fees but buys nothing");
     }
 }
