@@ -252,7 +252,7 @@
     <h3 class="shouchuo">链上挂单 <span style="font-size:13px;color:var(--dim);font-weight:400">— 全部在 Element 合约上成交，计入成交量与地板价</span></h3>
     <table id="book"><thead><tr><th>方向</th><th>tokenId</th><th class="n">价格 BNB</th><th>有效期</th><th></th></tr></thead><tbody id="bookBody"></tbody></table>
     <div class="empty" id="bookEmpty">暂无挂单</div>
-    <p class="note">买单是金库出价收货（任何人可以卖给它）；卖单是金库出货。我们不占用 Element 的挂单列表，但成交走的是 Element 合约，成交记录与真实交易完全一致。</p>
+    <p class="note">买单是金库出价收货——<b style="color:var(--yellow)">点「卖给金库」一步成交</b>，不用自己去调合约；卖单是金库出货。我们不占用 Element 的挂单列表，但成交走的是 Element 合约，成交记录与真实交易完全一致。</p>
   </div>
 
   <div id="log">等待连接节点…</div>
@@ -488,6 +488,74 @@ function renderInv(ids, ask) {
   box.querySelectorAll('[data-buy]').forEach(b => b.onclick = () => buyFromTreasury(b.dataset.buy));
 }
 
+const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11';
+const MC_ABI = ['function aggregate3((address target,bool allowFailure,bytes callData)[] calls) view returns ((bool success,bytes returnData)[])'];
+const NFT_ABI = ['function ownerOf(uint256) view returns (address)', 'function totalSupply() view returns (uint256)',
+                 'function isApprovedForAll(address,address) view returns (bool)', 'function setApprovalForAll(address,bool)'];
+// Element 的 NFTBuyOrder 元组 + PRESIGNED 签名
+const BUY_TUPLE = '(address,address,uint256,uint256,address,uint256,(address,uint256,bytes)[],address,uint256,(address,bytes)[])';
+const EX_SELL_ABI = [`function sellERC721(${BUY_TUPLE} order,(uint8,uint8,bytes32,bytes32) sig,uint256 tokenId,bool unwrapNative,bytes cb)`];
+
+let myTokensCache = null;
+// 合约不支持 Enumerable，只能全量扫 ownerOf；用 Multicall3 打包成几次请求
+async function myNiuLai(force) {
+  if (myTokensCache && !force) return myTokensCache;
+  const nft = new ethers.Contract(CONFIG.nft, NFT_ABI, rp());
+  const total = Number(await nft.totalSupply());
+  const mc = new ethers.Contract(MULTICALL3, MC_ABI, rp());
+  const iface = new ethers.Interface(NFT_ABI);
+  const mine = [];
+  for (let from = 1; from <= total; from += 250) {
+    const ids = [];
+    for (let i = from; i < Math.min(from + 250, total + 1); i++) ids.push(i);
+    const res = await mc.aggregate3.staticCall(
+      ids.map(i => ({ target: CONFIG.nft, allowFailure: true, callData: iface.encodeFunctionData('ownerOf', [i]) })));
+    res.forEach((r, k) => {
+      if (!r.success) return;
+      const owner = iface.decodeFunctionResult('ownerOf', r.returnData)[0];
+      if (owner.toLowerCase() === account.toLowerCase()) mine.push(ids[k]);
+    });
+  }
+  myTokensCache = mine;
+  return mine;
+}
+
+// 吃掉金库挂在 Element 上的买单 —— 用户不用自己去调合约
+async function sellToVault(o) {
+  if (!account) return connect();
+  const btns = $('bookBody').querySelectorAll('button');
+  btns.forEach(b => b.disabled = true);
+  try {
+    log('正在查你持有哪几枚牛来…');
+    const mine = await myNiuLai(true);
+    if (!mine.length) { log('你的钱包里没有牛来 NFT'); return; }
+    let tokenId = mine[0];
+    if (mine.length > 1) {
+      const ans = prompt(`你持有 ${mine.length} 枚：${mine.join(', ')}\n要卖哪一枚？（填 tokenId）`, String(mine[0]));
+      if (ans === null) { log('已取消'); return; }
+      tokenId = Number(ans.trim());
+      if (!mine.includes(tokenId)) { log(`#${tokenId} 不在你名下`); return; }
+    }
+    const nft = new ethers.Contract(CONFIG.nft, NFT_ABI, signer);
+    if (!(await nft.isApprovedForAll(account, CONFIG.element))) {
+      log('第一次卖需要先授权 Element（只需一次）…');
+      await (await nft.setApprovalForAll(CONFIG.element, true)).wait();
+      log('授权完成');
+    }
+    const ex = new ethers.Contract(CONFIG.element, EX_SELL_ABI, signer);
+    const Z = '0x' + '0'.repeat(64);
+    log(`卖出 #${tokenId} → ${Number(ethers.formatEther(o.price)).toFixed(4)} BNB`);
+    const tx = await ex.sellERC721(o.order, [1, 0, Z, Z], tokenId, true, '0x');   // 1 = PRESIGNED
+    log('已提交 ' + tx.hash);
+    await tx.wait();
+    log(`成交 ✔ #${tokenId} 已卖给金库，BNB 已到账`);
+    myTokensCache = null; refresh(); loadBook();
+  } catch (e) {
+    const m = e.shortMessage || e.message || '';
+    log('卖出失败：' + (m.includes('rejected') ? '你取消了交易' : m));
+  } finally { btns.forEach(b => b.disabled = false); }
+}
+
 async function loadBook() {
   try {
     const r = await fetch(CONFIG.ordersUrl + '?t=' + Date.now());
@@ -504,9 +572,10 @@ async function loadBook() {
         <td>${r2.id}</td>
         <td class="n">${Number(ethers.formatEther(r2.price)).toFixed(4)}</td>
         <td>${new Date(Number(r2.exp) * 1000).toLocaleString()}</td>
-        <td>${r2.side === 'sell' ? `<button class="btn sm" data-el="${i}">在 Element 买</button>` : '<span style="color:var(--dim)">用下方合约调用卖出</span>'}</td>
+        <td>${r2.side === 'sell' ? `<button class="btn sm" data-el="${i}">在 Element 买</button>` : `<button class="btn sm" data-sell="${i}">卖给金库</button>`}</td>
       </tr>`).join('');
     $('bookBody').querySelectorAll('[data-el]').forEach(btn => btn.onclick = () => fillSell(rows[btn.dataset.el].o));
+    $('bookBody').querySelectorAll('[data-sell]').forEach(btn => btn.onclick = () => sellToVault(rows[btn.dataset.sell].o));
   } catch { $('bookEmpty').style.display = 'block'; $('bookEmpty').textContent = '暂无挂单（keeper 尚未发布）'; }
 }
 

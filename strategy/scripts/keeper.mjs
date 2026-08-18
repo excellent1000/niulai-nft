@@ -46,6 +46,9 @@ const T_ABI = [
   'function unwrapIdle()',
   'function committedWbnb() view returns (uint256)',
   'function cancelBuyOrders(uint256[] nonces)',
+  'function setBidPrice(uint256 p)',
+  'function maxBidPrice() view returns (uint256)',
+  'function bidStepBps() view returns (uint16)',
   'function approvedListings(bytes32) view returns (bool)',
 ];
 const EX_ABI = ['function getERC721SellOrderHash((address,address,uint256,uint256,address,uint256,(address,uint256,bytes)[],address,uint256) o) view returns (bytes32)'];
@@ -55,6 +58,17 @@ const signer = new ethers.NonceManager(new ethers.Wallet(process.env.KEEPER_PK, 
 const T = new ethers.Contract(TREASURY, T_ABI, signer);
 const EX = new ethers.Contract(ELEMENT, EX_ABI, provider);
 const nft = new ethers.Contract(NFT, ['function ownerOf(uint256) view returns (address)'], provider);
+
+// Element 成交不经过 sellToTreasury，收单价得由 keeper 手动阶梯上调
+async function bumpBid(n) {
+  const [cur, stepBps, maxBid] = await Promise.all([T.bidPrice(), T.bidStepBps(), T.maxBidPrice()]);
+  let next = cur;
+  for (let i = 0; i < n; i++) next = next + (next * BigInt(stepBps)) / 10000n;
+  if (maxBid > 0n && next > maxBid) next = maxBid;
+  if (next === cur) return;
+  await (await T.setBidPrice(next)).wait();
+  log(`收单价 ${ethers.formatEther(cur)} → ${ethers.formatEther(next)}（收了 ${n} 枚）`);
+}
 
 // 记录我们挂过的卖单，避免重复挂
 const listed = new Set();
@@ -89,6 +103,9 @@ async function tick() {
     await (await T.syncInventory(toSync)).wait();
     log(`syncInventory：入库 ${toAdd.length}，出库 ${toRemove.length}`);
     toRemove.forEach(id => { listed.delete(id); book.sell = book.sell.filter(x => x.tokenId !== id); });
+    // 走 Element 买单成交的，合约里 sellToTreasury 根本没被调用 —— 收单价不会自动 +2%。
+    // 「只涨不跌，每收一枚上调」是对外承诺的机制，这里补上。
+    if (toAdd.length) await bumpBid(toAdd.length);
   }
 
   // ③ 卖货所得：先回本金，只烧利润
