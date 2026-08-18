@@ -146,8 +146,8 @@
   </header>
 
   <div class="pre" id="preBanner" style="display:none">
-    <h3 class="shouchuo">尚未开盘</h3>
-    <p>$NLSTR 合约还没有部署，下面的数字都是空的，<b>现在市面上任何叫 "NLSTR / 牛来永动机" 的代币都不是我们的</b>。
+    <h3 class="shouchuo" id="preTitle">尚未开盘</h3>
+    <p id="preBody">$NLSTR 合约还没有部署，下面的数字都是空的，<b>现在市面上任何叫 "NLSTR / 牛来永动机" 的代币都不是我们的</b>。
     开盘时间与合约地址会先发在 <a href="https://x.com/Niulai_NFT" target="_blank" rel="noopener" style="color:var(--yellow)">@Niulai_NFT</a>，
     以本页显示的地址为准。这一页会在开盘那一刻自动开始显示行情。</p>
   </div>
@@ -268,9 +268,9 @@ const CONFIG = {
   rpcs: [q.get('rpc'), 'https://lb.drpc.live/bsc/AsVs23QoLEOwisC7Py3FTOo-9Orrf6UR8a6vijtBrJVX', 'https://bsc-dataseed.bnbchain.org', 'https://bsc-dataseed1.defibit.io',
          'https://bsc-dataseed1.ninicoin.io', 'https://bsc-rpc.publicnode.com', 'https://1rpc.io/bnb',
          'https://bsc.drpc.org', 'https://bsc-dataseed.binance.org', 'https://binance.llamarpc.com'].filter(Boolean),
-  treasury: q.get('treasury') || '',
-  nlstr:    q.get('nlstr')    || '',
-  hook:     q.get('hook')     || '',
+  treasury: q.get('treasury') || '0xa117EA824d7c99083d90Ee3af7782cBe24BA1d95',
+  nlstr:    q.get('nlstr')    || '0xD66122F5f80B52d925183a4f00B1bfC82C90C512',
+  hook:     q.get('hook')     || '0xAE3e67c0A435d95D0B408bab4B32a5D872E3E880',
   nft: '0x5fd0d8FeCF408f61080cEa470249026d3e02fB3D',
   element: '0xb3e3DfCb2d9f3DdE16d78B9e6EB3538Eb32B5ae1',
   imgBase: 'https://niulai.sbs/img/',
@@ -284,6 +284,22 @@ for (const k of ['treasury', 'nlstr', 'hook', 'nft', 'element']) {
   catch { console.warn('地址无效，已忽略:', k, CONFIG[k]); CONFIG[k] = ''; }
 }
 const DEPLOYED = !!CONFIG.treasury;
+let launched = false;   // 由链上 launchTime 决定，不是由「配没配地址」决定
+
+// 未开盘时也能展示的确定信息：地址、收单价、总量
+async function fillStaticFacts() {
+  try {
+    const t = T();
+    const [bid, ask, markup, step] = await Promise.all([t.bidPrice(), t.askPrice(), t.askMarkupBps(), t.bidStepBps()]);
+    $('bid').textContent = fmt(bid, 4);
+    $('ask').textContent = fmt(ask, 4);
+    $('markup').textContent = (Number(markup) / 10000).toFixed(2) + '×';
+    $('step').textContent = (Number(step) / 100).toFixed(1) + '%';
+    $('burned').textContent = '0'; $('toVault').textContent = '0 BNB';
+    $('treasuryLink').textContent = CONFIG.treasury.slice(0, 10) + '…';
+    $('treasuryLink').href = 'https://bscscan.com/address/' + CONFIG.treasury;
+  } catch (e) { log('读金库参数失败：' + (e.shortMessage || e.message)); }
+}
 
 const T_ABI = ['function bidPrice() view returns (uint256)','function askPrice() view returns (uint256)',
  'function nftFund() view returns (uint256)','function bidCost() view returns (uint256)',
@@ -357,7 +373,8 @@ function renderFee() {
 setInterval(renderFee, 1000);
 
 let preDone = false;
-function preLaunchUI() {
+// deployed=false 合约都还没有；deployed=true 但没开盘 = 池子不存在，买卖必然 revert
+function preLaunchUI(deployed) {
   if (preDone) return;
   preDone = true;
   document.body.classList.add('pre-mode');
@@ -365,19 +382,36 @@ function preLaunchUI() {
   $('heroTitle').textContent = '等待开盘';
   $('feeNow').textContent = '95% → 10%'; $('feeNow').className = '';
   $('feeCountdown').textContent = '开盘后 5 分钟';
-  $('burned').textContent = '0'; $('toVault').textContent = '0 BNB';
   $('chart').innerHTML = '<div class="empty" style="padding:70px 0">开盘后显示行情</div>';
   $('swapBtn').textContent = '尚未开盘'; $('swapBtn').disabled = true;
   $('supply').textContent = '10 亿枚';
-  $('markup').textContent = '1.35×'; $('step').textContent = '2%';
   $('invEmpty').textContent = '开盘后金库才会开始收货';
   $('bookEmpty').textContent = '开盘后金库会在 Element 上挂单';
-  log('合约尚未部署。想预览可加 ?treasury=0x..&nlstr=0x..&hook=0x..');
+  if (deployed) {
+    // 合约已经在链上且已开源，把地址亮出来让人自己查，但交易仍然禁用
+    $('preTitle').textContent = '合约已部署 · 尚未开盘';
+    $('preBody').innerHTML = '三个合约已经部署到 BSC 主网并在 BscScan 上开源，地址见下方，'
+      + '<b>以本页显示的为准</b>。但流动性池还没建，<b>现在买不到，任何声称能买的都是假的</b>。'
+      + '开盘时间会发在 <a href="https://x.com/Niulai_NFT" target="_blank" rel="noopener" style="color:var(--yellow)">@Niulai_NFT</a>，'
+      + '这一页会在开盘那一刻自动开始显示行情。';
+    $('tokAddr').textContent = CONFIG.nlstr.slice(0, 6) + '…' + CONFIG.nlstr.slice(-4);
+    log('合约已部署，尚未开盘（launchTime=0，池子不存在）');
+  } else {
+    $('burned').textContent = '0'; $('toVault').textContent = '0 BNB';
+    $('markup').textContent = '1.35×'; $('step').textContent = '2%';
+    log('合约尚未部署。想预览可加 ?treasury=0x..&nlstr=0x..&hook=0x..');
+  }
 }
 
 async function refresh() {
-  if (!DEPLOYED) { preLaunchUI(); return; }
+  if (!DEPLOYED) { preLaunchUI(false); return; }
   if (!ro && !signer) await pickRpc();
+  if (!launched) {
+    try {
+      if (Number(await H().launchTime()) === 0) { preLaunchUI(true); await fillStaticFacts(); return; }
+      launched = true;
+    } catch (e) { log('读 launchTime 失败：' + (e.shortMessage || e.message)); return; }
+  }
   try {
     const t = T(), h = H(), e = E();
     const [bid, ask, fund, cost, markup, step, bought, sold, burned, toVault, recycled, pending, inv] =
@@ -745,10 +779,12 @@ $('swapBtn').onclick = doSwap;
 setSide('buy');
 
 if (DEPLOYED) {
-  pickRpc().then(refresh).then(loadBook).then(loadCandles);
-  setInterval(() => { refresh(); loadBook(); loadCandles(); }, 30000);
+  // 没开盘之前 candles.json / orders.json 还不存在，别去拉（只会 404）
+  const tick = () => refresh().then(() => { if (launched) { loadBook(); loadCandles(); } });
+  pickRpc().then(tick);
+  setInterval(tick, 30000);
 } else {
-  preLaunchUI();   // 没部署就别去连节点、别拉 candles/orders（只会 404）
+  preLaunchUI(false);   // 没配地址：不连节点、不拉 candles/orders
 }
 </script>
 </body>

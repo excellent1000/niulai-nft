@@ -23,4 +23,5 @@ remappings = [
 bsc = "${BSC_RPC_URL}"
 
 [etherscan]
-bsc = { key = "${BSCSCAN_API_KEY}", url = "https://api.bscscan.com/api", chain = 56 }
+# BscScan 的 V1 接口(api.bscscan.com/api)已停用，必须走 Etherscan V2 多链接口
+bsc = { key = "${BSCSCAN_API_KEY}", url = "https://api.etherscan.io/v2/api?chainid=56", chain = 56 }
