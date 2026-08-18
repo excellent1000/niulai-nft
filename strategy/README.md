@@ -62,25 +62,15 @@ $NLSTR 每笔 swap 抽 10%（开盘 95% 线性衰减，金库是唯一 LP 所以
 **风控**：`placeBuyOrders` 强制 `price ≤ bidPrice`，`approveListing` 强制 `price ≥ askPrice()`。
 即使 keeper 私钥泄露，攻击者既不能高价乱买、也不能低价甩卖。
 
-## 免税白名单
+## 代币分配
 
-代币本身**零转账税**，所以转账/空投/进出交易所本来就免费；白名单只影响池子里 swap 的费率。
-
-v4 的 `beforeSwap` 拿到的 `sender` 是**调用 PoolManager 的合约（路由器）**，不是最终用户，因此有两种模式：
-
-| 模式 | 做法 | 实测（同样花 1 BNB）|
+| 份额 | 去向 | 说明 |
 |---|---|---|
-| 只白名单钱包地址 | `setFeeExempt(wallet, true)` | ❌ 无效，12830 万枚（和缴税一样）|
-| 开启 `originExempt` 后白名单钱包 | 再 `setOriginExempt(true)` | ✅ 14033 万枚（+9.4%）|
-| 白名单路由器本身 | `setFeeExempt(router, true)` | ✅ 14033 万枚（但**该路由器上所有人都免税**）|
-| 白名单金库自己 | `setFeeExempt(treasury, true)` | ✅ 同样的钱多烧约 10% 的 NLSTR |
+| 80% | **单边入池，永久锁死** | 金库合约里没有撤出流动性的函数 |
+| 10% | NFT 持有者空投 | 按 999 枚的持有量快照发放 |
+| 10% | dev | 不锁 |
 
-**信任设计**：名单公开可查（`exemptList` / `exemptCount`），并提供
-`renounceExemptControl()` 永久放弃「新增免税地址」的权力——上线后调用可以彻底堵死
-"团队偷偷加白名单砸盘"的质疑。已有地址仍可移除，只是不能再加。
-
-> ⚠️ 免税名单是最容易被社区攻击的点。建议只豁免**金库自己**（让回购销毁更高效），
-> 开盘后立刻 `renounceExemptControl()`，并把这件事写进公告。
+**没有免税白名单**：项目方、金库、做市商与散户完全同一费率，合约里不存在任何减免入口。
 
 ## 主网 fork 演练
 
@@ -89,13 +79,14 @@ BSC_RPC_URL=<你的BSC节点> forge test -vv
 # 可调开盘曲线：TICK_UPPER=189300 TICK_LOWER=-887220 forge test --match-test test_08 -vv
 ```
 
-**26 个用例全部通过**，全部打真实合约（v4 PoolManager / Element ElementEx / 牛来 NFT / 分红金库）：
+**25 个用例全部通过**，全部打真实合约（v4 PoolManager / Element ElementEx / 牛来 NFT / 分红金库）：
 
-- `ForkE2E`（16）单边开盘 · 费率衰减 · 80-10-10 分账 · 收单价阶梯 · 柜台买卖 · 流动性锁死 ·
-  价格曲线 · 卖单税销毁 · 开盘防巨鲸 · **完整飞轮走 Element** · 亏本卖出处理 · 单圈资金守恒 · 免税白名单两种模式 · 金库免税回购
+- `ForkE2E`（14）单边开盘 · 费率衰减 · 80-10-10 分账 · 收单价阶梯 · 柜台买卖 · 流动性锁死 ·
+  价格曲线 · 卖单税销毁 · 开盘防巨鲸 · **完整飞轮走 Element** · 亏本卖出处理 · 单圈资金守恒
 - `ElementFill`（3）合约挂卖单成交 · 带版税成交 · 成交事件与真实成交比对
 - `ElementBuyOrder`（5）链上挂买单 · 合集通吃 · 单张成交次数 · 撤单 · nonce 复用
 - `ElementProbe`（2）签名类型探测
+- `UniversalRouterBuy`（1）**用 BSC 上真实的 Uniswap Universal Router 买入**（真实用户路径）
 
 ## 开盘曲线参数（已定）
 
@@ -122,7 +113,8 @@ BSC_RPC_URL=<你的BSC节点> forge test -vv
 
 ## 未完成
 
-- [ ] 部署脚本 `script/Deploy.s.sol`（含 hook 地址挖矿）
+- [x] 部署脚本 `script/Deploy.s.sol`（含 hook 地址 CREATE2 挖矿）——
+      anvil 主网分叉实测：**全新钱包只需 0.01 BNB，实际耗 gas 0.00032 BNB**
 - [ ] keeper 脚本：补挂买单 / 挂卖单 / 调 syncInventory 与 processSaleProceeds
 - [ ] 空投名单与发放脚本
 - [ ] 网站面板：收单价 / 进度条 / 金库存货 / 销毁计数 / 柜台

@@ -17,6 +17,7 @@ import {LPFeeLibrary} from "v4-core/src/libraries/LPFeeLibrary.sol";
 ///   2. beforeAddLiquidity —— **只有金库能加流动性**。金库合约里没有撤出流动性的代码，
 ///      所以本金被永久锁死，任何人（包括项目方）都取不出来，只能提取手续费。
 ///   3. beforeSwap —— 动态费率：开盘 95% 线性衰减到 10%，用来烧掉抢跑机器人。
+///      **没有任何免税白名单**：项目方、金库、做市商与散户完全同一费率，无法后门减免。
 ///      因为金库是唯一 LP，这 10% 全额进入金库 → 8% 收购牛来 NFT / 1% 进分红池 / 1% 团队。
 ///
 /// @dev 部署地址必须让低 14 位等于 REQUIRED_FLAGS（v4 用地址位编码钩子权限），需 CREATE2 挖矿。
@@ -46,14 +47,6 @@ contract NLSTRHook is IHooks {
     /// 开盘保护：衰减期内单笔买入上限（wei），0 = 不限制
     uint256 public launchMaxBuy;
 
-    /// 免税名单。注意：key 是**调用 PoolManager 的地址**（通常是路由器合约），
-    /// 想豁免某个真人钱包要开 originExempt（按 tx.origin 判断）。
-    mapping(address => bool) public feeExempt;
-    bool public originExempt;
-    /// 名单公开可查
-    address[] public exemptList;
-    /// 一旦放弃，永远无法再添加免税地址（上线后调用可增强信任）
-    bool public exemptControlRenounced;
 
     error NotPoolManager();
     error PoolNotAllowed();
@@ -63,13 +56,9 @@ contract NLSTRHook is IHooks {
     error FeeTooHigh();
     error HookNotImplemented();
     error BuyTooLarge();
-    error ExemptRenounced();
 
     event Launched(uint256 timestamp);
     event FinalFeeUpdated(uint24 pips);
-    event FeeExemptSet(address indexed account, bool exempt);
-    event OriginExemptSet(bool enabled);
-    event ExemptControlRenounced();
 
     modifier onlyPoolManager() {
         if (msg.sender != address(poolManager)) revert NotPoolManager();
@@ -106,36 +95,6 @@ contract NLSTRHook is IHooks {
         emit FinalFeeUpdated(pips);
     }
 
-    /// @notice 设置免税地址（只有金库/owner 可调，且可永久放弃该权限）
-    function setFeeExempt(address account, bool exempt) external {
-        if (msg.sender != treasury) revert NotTreasury();
-        if (exempt && exemptControlRenounced) revert ExemptRenounced();
-        if (exempt && !feeExempt[account]) exemptList.push(account);
-        feeExempt[account] = exempt;
-        emit FeeExemptSet(account, exempt);
-    }
-
-    /// @notice 是否同时按 tx.origin 判断（这样才能豁免通过路由器交易的真人钱包）
-    function setOriginExempt(bool enabled) external {
-        if (msg.sender != treasury) revert NotTreasury();
-        if (enabled && exemptControlRenounced) revert ExemptRenounced();
-        originExempt = enabled;
-        emit OriginExemptSet(enabled);
-    }
-
-    /// @notice 永久放弃「新增免税地址」的权力（已有的仍可移除）
-    function renounceExemptControl() external {
-        if (msg.sender != treasury) revert NotTreasury();
-        exemptControlRenounced = true;
-        emit ExemptControlRenounced();
-    }
-
-    function exemptCount() external view returns (uint256) { return exemptList.length; }
-
-    function isExempt(address sender, address origin) public view returns (bool) {
-        return feeExempt[sender] || (originExempt && feeExempt[origin]);
-    }
-
     // ---------------------------------------------------------------- 钩子
 
     function beforeInitialize(address, PoolKey calldata key, uint160)
@@ -164,7 +123,7 @@ contract NLSTRHook is IHooks {
         return IHooks.beforeAddLiquidity.selector;
     }
 
-    function beforeSwap(address sender, PoolKey calldata, SwapParams calldata params, bytes calldata)
+    function beforeSwap(address, PoolKey calldata, SwapParams calldata params, bytes calldata)
         external
         view
         onlyPoolManager
@@ -176,10 +135,6 @@ contract NLSTRHook is IHooks {
             if (params.zeroForOne && params.amountSpecified < 0 && uint256(-params.amountSpecified) > cap) {
                 revert BuyTooLarge();
             }
-        }
-        // 免税名单：0 费率
-        if (isExempt(sender, tx.origin)) {
-            return (IHooks.beforeSwap.selector, BeforeSwapDeltaLibrary.ZERO_DELTA, LPFeeLibrary.OVERRIDE_FEE_FLAG);
         }
         // 覆盖本次 swap 的 LP 费率；金库是唯一 LP，所以这笔费用 100% 归金库
         return (

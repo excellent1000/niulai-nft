@@ -191,19 +191,7 @@ contract StrategyTreasury is IUnlockCallback, IERC721Receiver, Ownable, Reentran
 
     function setKeeper(address k) external onlyOwner { keeper = k; }
 
-    /// @notice 转发到 hook 的免税名单管理（hook 只认金库地址）
-    function hookSetFeeExempt(address account, bool exempt) external onlyOwner {
-        (bool ok,) = hook.call(abi.encodeWithSignature("setFeeExempt(address,bool)", account, exempt));
-        if (!ok) revert TransferFailed();
-    }
-    function hookSetOriginExempt(bool enabled) external onlyOwner {
-        (bool ok,) = hook.call(abi.encodeWithSignature("setOriginExempt(bool)", enabled));
-        if (!ok) revert TransferFailed();
-    }
-    function hookRenounceExemptControl() external onlyOwner {
-        (bool ok,) = hook.call(abi.encodeWithSignature("renounceExemptControl()"));
-        if (!ok) revert TransferFailed();
-    }
+
     function setHook(address h) external onlyOwner { if (hook != address(0)) revert BadParam(); hook = h; }
     function setTeam(address t) external onlyOwner { if (t == address(0)) revert BadParam(); team = t; }
 
