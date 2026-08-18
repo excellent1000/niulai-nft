@@ -126,8 +126,16 @@ async function tick() {
       const firstNonce = Number(await T.nextOrderNonce());
       const roy = (bid * BigInt(await T.royaltyBps())) / 10000n;
       const vault0 = await T.dividendVault();
+      // 先撤掉上一批：合约不会自动取消，旧单会一直可成交，
+      // 而 committedWbnb 是覆盖不是累加 —— 留着它们只会让一部分单在成交时因 WBNB 不足而失败，
+      // 而且旧单价更低，等于给人留了个更便宜的口子。
+      const stale = book.buy.map(x => x.nonce);
+      if (stale.length) {
+        try { await (await T.cancelBuyOrders(stale)).wait(); log(`撤掉旧买单 ${stale.join(',')}`); }
+        catch (e) { log('撤旧单失败（不阻塞）：' + (e.shortMessage || e.message)); }
+      }
       await (await T.placeBuyOrders(n, bid, expiry)).wait();
-      book.buy = [];   // 旧买单已被新一批取代
+      book.buy = [];
       log(`挂 ${n} 张买单 @${ethers.formatEther(bid)} BNB（基金 ${ethers.formatEther(fund)}）`);
       // 买单必须公布出去，卖家才能调 Element 的 sellERC721 吃单
       for (let k = 0; k < n; k++) {

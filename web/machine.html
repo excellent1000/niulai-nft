@@ -308,7 +308,7 @@ const T_ABI = ['function bidPrice() view returns (uint256)','function askPrice()
  'function totalNlstrBurned() view returns (uint256)','function totalToVault() view returns (uint256)',
  'function totalPrincipalRecycled() view returns (uint256)','function pendingPrincipal() view returns (uint256)',
  'function inventory() view returns (uint256[])','function buyFromTreasury(uint256 tokenId) payable',
- 'function sellToTreasury(uint256 tokenId)'];
+ 'function sellToTreasury(uint256 tokenId)','function bidCost() view returns (uint256)','function bidPaused() view returns (bool)'];
 const H_ABI = ['function currentFeePips() view returns (uint24)','function launchTime() view returns (uint256)','function decaySeconds() view returns (uint256)','function finalFeePips() view returns (uint24)','function LAUNCH_FEE_PIPS() view returns (uint24)'];
 const E_ABI = ['function totalSupply() view returns (uint256)'];
 const EX_ABI = ['function buyERC721Ex((address,address,uint256,uint256,address,uint256,(address,uint256,bytes)[],address,uint256) o,(uint8,uint8,bytes32,bytes32) sig,address taker,bytes extra) payable'];
@@ -491,7 +491,8 @@ function renderInv(ids, ask) {
 const MULTICALL3 = '0xcA11bde05977b3631167028862bE2a173976CA11';
 const MC_ABI = ['function aggregate3((address target,bool allowFailure,bytes callData)[] calls) view returns ((bool success,bytes returnData)[])'];
 const NFT_ABI = ['function ownerOf(uint256) view returns (address)', 'function totalSupply() view returns (uint256)',
-                 'function isApprovedForAll(address,address) view returns (bool)', 'function setApprovalForAll(address,bool)'];
+                 'function isApprovedForAll(address,address) view returns (bool)', 'function setApprovalForAll(address,bool)',
+                 'function approve(address,uint256)', 'function getApproved(uint256) view returns (address)'];
 // Element 的 NFTBuyOrder 元组 + PRESIGNED 签名
 const BUY_TUPLE = '(address,address,uint256,uint256,address,uint256,(address,uint256,bytes)[],address,uint256,(address,bytes)[])';
 const EX_SELL_ABI = [`function sellERC721(${BUY_TUPLE} order,(uint8,uint8,bytes32,bytes32) sig,uint256 tokenId,bool unwrapNative,bytes cb)`];
@@ -544,8 +545,43 @@ async function sellToVault(o) {
     }
     const ex = new ethers.Contract(CONFIG.element, EX_SELL_ABI, signer);
     const Z = '0x' + '0'.repeat(64);
-    log(`卖出 #${tokenId} → ${Number(ethers.formatEther(o.price)).toFixed(4)} BNB`);
-    const tx = await ex.sellERC721(o.order, [1, 0, Z, Z], tokenId, true, '0x');   // 1 = PRESIGNED
+    // 页面上的订单最多能陈旧 30 秒，而买单常常几秒内就被别人吃掉。
+    // 所以卖之前重新拉一次，并逐张 staticCall 试算，只发真能成交的那张。
+    let cands = [o];
+    try {
+      const fresh = await (await fetch(CONFIG.ordersUrl + '?t=' + Date.now())).json();
+      if (fresh.buy?.length) cands = fresh.buy.slice().sort((a, b) => (BigInt(b.price) > BigInt(a.price) ? 1 : -1));
+    } catch {}
+    let picked = null;
+    for (const c of cands) {
+      try { await ex.sellERC721.staticCall(c.order, [1, 0, Z, Z], tokenId, true, '0x'); picked = c; break; }
+      catch { /* 这张已被吃掉或已过期，试下一张 */ }
+    }
+
+    let tx;
+    if (picked) {
+      // 优先走 Element：成交会计入 Element 的成交量和地板价
+      log(`卖出 #${tokenId} → ${Number(ethers.formatEther(picked.price)).toFixed(4)} BNB（经 Element）`);
+      tx = await ex.sellERC721(picked.order, [1, 0, Z, Z], tokenId, true, '0x');   // 1 = PRESIGNED
+    } else {
+      // 预签买单常常几秒内就被抢光。金库合约本身有 sellToTreasury，直接调更可靠，
+      // 而且 +2% 阶梯是写在合约里的。代价是这笔不计入 Element 的成交量。
+      const t = new ethers.Contract(CONFIG.treasury, T_ABI, signer);
+      const [fund, cost, paused] = await Promise.all([t.nftFund(), t.bidCost(), t.bidPaused()]);
+      if (paused) { log('金库已暂停收货'); return; }
+      if (fund < cost) {
+        log(`金库收购基金只剩 ${(+ethers.formatEther(fund)).toFixed(4)} BNB，`
+          + `买一枚要 ${(+ethers.formatEther(cost)).toFixed(4)} BNB（含版税）。`
+          + `基金来自 $NLSTR 交易手续费的 80%，等交易量补上来再卖。`);
+        return;
+      }
+      if ((await nft.getApproved(tokenId)).toLowerCase() !== CONFIG.treasury.toLowerCase()) {
+        log('授权金库取走这一枚…');
+        await (await nft.approve(CONFIG.treasury, tokenId)).wait();
+      }
+      log(`买单已被抢光，改走金库直连：#${tokenId} → ${(+ethers.formatEther(await t.bidPrice())).toFixed(4)} BNB`);
+      tx = await t.sellToTreasury(tokenId);
+    }
     log('已提交 ' + tx.hash);
     await tx.wait();
     log(`成交 ✔ #${tokenId} 已卖给金库，BNB 已到账`);
