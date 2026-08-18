@@ -372,7 +372,24 @@ function renderFee() {
 }
 setInterval(renderFee, 1000);
 
-let preDone = false;
+let preDone = false, preExited = false;
+
+// 开盘那一刻，已经开着的页面必须自己变回正常态——否则横幅、灰掉的买卖面板、
+// 图表占位会一直卡着，而那正是最多人盯着这一页的时候。
+function exitPreLaunch() {
+  if (preExited || !preDone) return;
+  preExited = true;
+  document.body.classList.remove('pre-mode');
+  $('preBanner').style.display = 'none';
+  $('chart').innerHTML = '';                 // 清掉占位，否则图表会画在提示文字下面
+  $('swapBtn').disabled = false;
+  $('invEmpty').textContent = '金库暂无库存';
+  $('bookEmpty').textContent = '暂无挂单';
+  // setSide 不管按钮文案，得自己按连没连钱包恢复
+  $('swapBtn').textContent = account ? (side === 'buy' ? '买入 $NLSTR' : '卖出 $NLSTR') : '连接钱包';
+  setSide(side);
+  log('开盘了 —— 页面已切到实时行情');
+}
 // deployed=false 合约都还没有；deployed=true 但没开盘 = 池子不存在，买卖必然 revert
 function preLaunchUI(deployed) {
   if (preDone) return;
@@ -410,6 +427,7 @@ async function refresh() {
     try {
       if (Number(await H().launchTime()) === 0) { preLaunchUI(true); await fillStaticFacts(); return; }
       launched = true;
+      exitPreLaunch();
     } catch (e) { log('读 launchTime 失败：' + (e.shortMessage || e.message)); return; }
   }
   try {
