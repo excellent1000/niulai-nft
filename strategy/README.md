@@ -163,6 +163,10 @@ cd web && python3 -m http.server 8891
 open "http://127.0.0.1:8891/machine.html?rpc=<节点>&treasury=0x..&nlstr=0x..&hook=0x.."
 ```
 
+> ⚠️ `strategy/broadcast/` 不进 git。anvil 分叉出来的 chainid 也是 56，
+> 演练会把 `broadcast/Deploy.s.sol/56/run-latest.json` 写成一份"看起来像主网"的部署记录，
+> 真上线时极易被当成已部署。以线上合约地址为准，不要读这个文件。
+
 ## 主网 fork 演练
 
 ```bash

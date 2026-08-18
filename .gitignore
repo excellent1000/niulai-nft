@@ -25,3 +25,5 @@ strategy/node_modules
 strategy/airdrop/sent-*.json
 web/candles.json
 web/orders.json
+strategy/broadcast/
+strategy/cache/
